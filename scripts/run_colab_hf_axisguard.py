@@ -281,6 +281,57 @@ def _predict(model: nn.Module, loader: DataLoader, device: str) -> tuple[np.ndar
     return np.concatenate(labels), np.concatenate(probs)
 
 
+def _clone_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
+    return {name: value.detach().cpu().clone() for name, value in model.state_dict().items()}
+
+
+def _restore_state_dict(model: nn.Module, state: dict[str, torch.Tensor]) -> None:
+    device_state = {name: value.to(next(model.parameters()).device) for name, value in state.items()}
+    model.load_state_dict(device_state)
+
+
+def _early_stop_score(metric: str, valid_row: dict[str, float]) -> float:
+    if metric in {"valid_auprc", "valid_auroc"}:
+        return float(valid_row[metric.removeprefix("valid_")])
+    if metric in {"valid_brier", "valid_ece"}:
+        return -float(valid_row[metric.removeprefix("valid_")])
+    raise ValueError(f"Unknown early stopping metric: {metric}")
+
+
+def _build_optimizer(model: HFAxisGuard, args: argparse.Namespace) -> torch.optim.Optimizer:
+    encoder_params = [param for param in model.encoder.parameters() if param.requires_grad]
+    encoder_ids = {id(param) for param in encoder_params}
+    head_params = [param for param in model.parameters() if param.requires_grad and id(param) not in encoder_ids]
+    groups = []
+    if encoder_params:
+        groups.append({"params": encoder_params, "lr": args.backbone_lr if args.backbone_lr is not None else args.lr})
+    if head_params:
+        groups.append({"params": head_params, "lr": args.head_lr if args.head_lr is not None else args.lr})
+    return torch.optim.AdamW(groups, lr=args.lr, weight_decay=args.weight_decay)
+
+
+def _summarize_metrics(frame: pd.DataFrame, group_cols: list[str], metrics: list[str]) -> pd.DataFrame:
+    rows = []
+    for keys, group in frame.groupby(group_cols, dropna=False):
+        if not isinstance(keys, tuple):
+            keys = (keys,)
+        prefix = dict(zip(group_cols, keys))
+        for metric in metrics:
+            values = pd.to_numeric(group[metric], errors="coerce").dropna()
+            rows.append(
+                {
+                    **prefix,
+                    "metric": metric,
+                    "mean": float(values.mean()) if len(values) else float("nan"),
+                    "std": float(values.std(ddof=1)) if len(values) > 1 else 0.0,
+                    "min": float(values.min()) if len(values) else float("nan"),
+                    "max": float(values.max()) if len(values) else float("nan"),
+                    "n_seeds": int(group["seed"].nunique()) if "seed" in group.columns else int(len(group)),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def _predict_rc_ensemble(
     model: nn.Module,
     frame: pd.DataFrame,
@@ -391,11 +442,17 @@ def run_one(args: argparse.Namespace, seed: int) -> tuple[pd.DataFrame, pd.DataF
         freeze_backbone=args.freeze_backbone,
         trust_remote_code=args.trust_remote_code,
     ).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = _build_optimizer(model, args)
     labels = train["label"].to_numpy(dtype=np.float32)
     pos_weight = torch.tensor(max((len(labels) - labels.sum()) / max(labels.sum(), 1), 1.0), device=device)
     loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     ce_loss = nn.CrossEntropyLoss()
+
+    best_score = -float("inf")
+    best_epoch = 0
+    best_state = _clone_state_dict(model)
+    epochs_without_improvement = 0
+    history_rows = []
 
     for epoch in range(args.epochs):
         model.train()
@@ -447,7 +504,54 @@ def run_one(args: argparse.Namespace, seed: int) -> tuple[pd.DataFrame, pd.DataF
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             optimizer.step()
             losses.append(float(loss.detach().cpu()))
-        print(f"seed={seed} epoch={epoch + 1}/{args.epochs} loss={np.mean(losses):.4f}", flush=True)
+        valid_y_epoch, valid_p_epoch = _predict(model, valid_loader, device)
+        valid_row = _binary_row(valid_y_epoch, valid_p_epoch)
+        score = _early_stop_score(args.early_stopping_metric, valid_row)
+        improved = score > best_score + float(args.early_stopping_min_delta)
+        if improved:
+            best_score = score
+            best_epoch = epoch + 1
+            best_state = _clone_state_dict(model)
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+        history_rows.append(
+            {
+                "seed": seed,
+                "epoch": epoch + 1,
+                "train_loss": float(np.mean(losses)),
+                "valid_auprc": valid_row["auprc"],
+                "valid_auroc": valid_row["auroc"],
+                "valid_ece": valid_row["ece"],
+                "valid_brier": valid_row["brier"],
+                "early_stopping_metric": args.early_stopping_metric,
+                "best_epoch": best_epoch,
+                "is_best": improved,
+            }
+        )
+        print(
+            "seed={seed} epoch={epoch}/{epochs} loss={loss:.4f} "
+            "val_auprc={auprc:.4f} val_brier={brier:.4f} val_ece={ece:.4f} best_epoch={best_epoch}{star}".format(
+                seed=seed,
+                epoch=epoch + 1,
+                epochs=args.epochs,
+                loss=float(np.mean(losses)),
+                auprc=valid_row["auprc"],
+                brier=valid_row["brier"],
+                ece=valid_row["ece"],
+                best_epoch=best_epoch,
+                star=" *" if improved else "",
+            ),
+            flush=True,
+        )
+        if args.early_stopping_patience > 0 and epochs_without_improvement >= args.early_stopping_patience:
+            print(
+                f"seed={seed} early_stopping at epoch={epoch + 1}; restoring best_epoch={best_epoch}",
+                flush=True,
+            )
+            break
+
+    _restore_state_dict(model, best_state)
 
     if args.rc_ensemble:
         valid_y, valid_p = _predict_rc_ensemble(
@@ -497,7 +601,8 @@ def run_one(args: argparse.Namespace, seed: int) -> tuple[pd.DataFrame, pd.DataF
     selective.insert(0, "model", args.model_name)
     selective.insert(0, "split", split_spec.name)
     selective.insert(0, "seed", seed)
-    return pd.DataFrame(result_rows), pd.concat(pred_rows, ignore_index=True), selective
+    history = pd.DataFrame(history_rows)
+    return pd.DataFrame(result_rows), pd.concat(pred_rows, ignore_index=True), selective, history
 
 
 def main() -> int:
@@ -512,6 +617,8 @@ def main() -> int:
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=2e-5)
+    parser.add_argument("--backbone-lr", type=float, default=None)
+    parser.add_argument("--head-lr", type=float, default=None)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--max-tokens", type=int, default=256)
     parser.add_argument("--embedding-dim", type=int, default=16)
@@ -527,6 +634,13 @@ def main() -> int:
     parser.add_argument("--rc-ensemble", action="store_true", help="Average forward and reverse-complement probabilities.")
     parser.add_argument("--device", choices=["cpu", "cuda"], default="cuda")
     parser.add_argument("--freeze-backbone", action="store_true")
+    parser.add_argument("--early-stopping-patience", type=int, default=0)
+    parser.add_argument("--early-stopping-min-delta", type=float, default=0.0)
+    parser.add_argument(
+        "--early-stopping-metric",
+        choices=["valid_auprc", "valid_auroc", "valid_brier", "valid_ece"],
+        default="valid_brier",
+    )
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--drop-all-n", action="store_true")
     parser.add_argument("--drop-duplicate-sequences", action="store_true")
@@ -536,19 +650,39 @@ def main() -> int:
     result_frames = []
     pred_frames = []
     selective_frames = []
+    history_frames = []
     args.out.mkdir(parents=True, exist_ok=True)
     result_path = args.out / f"{args.prefix}_results.csv"
     pred_path = args.out / f"{args.prefix}_predictions.csv"
     selective_path = args.out / f"{args.prefix}_selective.csv"
+    history_path = args.out / f"{args.prefix}_training_history.csv"
+    result_summary_path = args.out / f"{args.prefix}_result_summary.csv"
+    selective_summary_path = args.out / f"{args.prefix}_selective_summary.csv"
     for seed_idx, seed in enumerate(args.seed, start=1):
         print(f"[hf-axisguard] seed {seed_idx}/{len(args.seed)} = {seed}", flush=True)
-        results, predictions, selective = run_one(args, seed)
+        results, predictions, selective, history = run_one(args, seed)
         result_frames.append(results)
         pred_frames.append(predictions)
         selective_frames.append(selective)
-        pd.concat(result_frames, ignore_index=True).to_csv(result_path, index=False)
-        pd.concat(pred_frames, ignore_index=True).to_csv(pred_path, index=False)
-        pd.concat(selective_frames, ignore_index=True).to_csv(selective_path, index=False)
+        history_frames.append(history)
+        all_results = pd.concat(result_frames, ignore_index=True)
+        all_predictions = pd.concat(pred_frames, ignore_index=True)
+        all_selective = pd.concat(selective_frames, ignore_index=True)
+        all_history = pd.concat(history_frames, ignore_index=True)
+        all_results.to_csv(result_path, index=False)
+        all_predictions.to_csv(pred_path, index=False)
+        all_selective.to_csv(selective_path, index=False)
+        all_history.to_csv(history_path, index=False)
+        _summarize_metrics(
+            all_results,
+            ["split", "model", "calibrated"],
+            ["auprc", "auroc", "ece", "brier"],
+        ).to_csv(result_summary_path, index=False)
+        _summarize_metrics(
+            all_selective,
+            ["split", "model", "calibrated", "coverage"],
+            ["auprc", "auroc", "ece", "brier"],
+        ).to_csv(selective_summary_path, index=False)
     return 0
 
 
