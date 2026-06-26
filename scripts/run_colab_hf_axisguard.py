@@ -10,7 +10,7 @@ import torch
 from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
-from transformers import AutoConfig, AutoModel, AutoTokenizer
+from transformers import AutoConfig, AutoModelForMaskedLM, AutoTokenizer
 
 from assayshift_tf.benchmark import (
     _mask_leaky_metadata,
@@ -27,18 +27,52 @@ from assayshift_tf.splits import make_split
 RC_TRANS = str.maketrans("ACGTNacgtn", "TGCANtgcan")
 
 
+def ensure_nucleotide_transformer_compat() -> None:
+    # The NT v2 remote modeling file was authored against an older Transformers
+    # utility surface. Newer Colab images keep prune_linear_layer but no longer
+    # export this helper, so provide the original implementation before dynamic
+    # remote-code import executes.
+    import transformers.pytorch_utils as pytorch_utils
+
+    if hasattr(pytorch_utils, "find_pruneable_heads_and_indices"):
+        return
+
+    def find_pruneable_heads_and_indices(heads, n_heads, head_size, already_pruned_heads):
+        mask = torch.ones(n_heads, head_size)
+        heads = set(heads) - already_pruned_heads
+        for head in heads:
+            head = head - sum(1 if pruned_head < head else 0 for pruned_head in already_pruned_heads)
+            mask[head] = 0
+        mask = mask.view(-1).contiguous().eq(1)
+        index = torch.arange(len(mask))[mask].long()
+        return heads, index
+
+    pytorch_utils.find_pruneable_heads_and_indices = find_pruneable_heads_and_indices
+
+
 def load_hf_encoder(hf_model: str, *, trust_remote_code: bool) -> nn.Module:
+    ensure_nucleotide_transformer_compat()
     config = AutoConfig.from_pretrained(hf_model, trust_remote_code=trust_remote_code)
-    # Newer Transformers ESM implementations expect RoPE attributes that older
-    # Nucleotide Transformer configs do not serialize. Fill conservative defaults
-    # before model construction so Colab's preinstalled stack remains usable.
-    if not hasattr(config, "rope_theta"):
-        config.rope_theta = 10000.0
-    if not hasattr(config, "partial_rotary_factor"):
-        config.partial_rotary_factor = 1.0
-    if not hasattr(config, "head_dim") and hasattr(config, "hidden_size") and hasattr(config, "num_attention_heads"):
-        config.head_dim = config.hidden_size // config.num_attention_heads
-    return AutoModel.from_pretrained(hf_model, config=config, trust_remote_code=trust_remote_code)
+    for name, value in {
+        "is_decoder": False,
+        "add_cross_attention": False,
+        "output_attentions": False,
+        "output_hidden_states": False,
+        "use_return_dict": True,
+    }.items():
+        if not hasattr(config, name):
+            setattr(config, name, value)
+    # Nucleotide Transformer v2 registers its custom GLU ESM implementation for
+    # AutoModelForMaskedLM, not generic AutoModel. Load the official class and
+    # unwrap the encoder so the checkpoint shapes match the remote model code.
+    masked_lm = AutoModelForMaskedLM.from_pretrained(hf_model, config=config, trust_remote_code=trust_remote_code)
+    if hasattr(masked_lm, "esm"):
+        return masked_lm.esm
+    if hasattr(masked_lm, "get_encoder"):
+        return masked_lm.get_encoder()
+    if hasattr(masked_lm, "base_model"):
+        return masked_lm.base_model
+    raise TypeError(f"Could not locate an encoder module inside {type(masked_lm).__name__}")
 
 
 def reverse_complement(sequence: str) -> str:
