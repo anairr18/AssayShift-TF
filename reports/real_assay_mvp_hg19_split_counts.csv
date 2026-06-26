@@ -1,0 +1,7 @@
+split,split_type,holdout,partition,n,positive,negative,prevalence
+iid,iid,,train,3840,1920,1920,0.5
+iid,iid,,valid,960,480,480,0.5
+iid,iid,,test,1200,600,600,0.5
+assay_heldout_cutrun,assay,CUT&RUN,train,2400,1200,1200,0.5
+assay_heldout_cutrun,assay,CUT&RUN,valid,600,300,300,0.5
+assay_heldout_cutrun,assay,CUT&RUN,test,3000,1500,1500,0.5

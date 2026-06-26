@@ -1,0 +1,10 @@
+seed,split,split_type,holdout,partition,n,positive,negative,prevalence
+13,lab_heldout_haib,lab,"Richard Myers, HAIB",train,4705,2400,2305,0.51009564293305
+13,lab_heldout_haib,lab,"Richard Myers, HAIB",valid,1177,600,577,0.5097706032285472
+13,lab_heldout_haib,lab,"Richard Myers, HAIB",test,1952,1000,952,0.5122950819672131
+17,lab_heldout_haib,lab,"Richard Myers, HAIB",train,4705,2400,2305,0.51009564293305
+17,lab_heldout_haib,lab,"Richard Myers, HAIB",valid,1177,600,577,0.5097706032285472
+17,lab_heldout_haib,lab,"Richard Myers, HAIB",test,1952,1000,952,0.5122950819672131
+23,lab_heldout_haib,lab,"Richard Myers, HAIB",train,4705,2400,2305,0.51009564293305
+23,lab_heldout_haib,lab,"Richard Myers, HAIB",valid,1177,600,577,0.5097706032285472
+23,lab_heldout_haib,lab,"Richard Myers, HAIB",test,1952,1000,952,0.5122950819672131

@@ -1,0 +1,10 @@
+split,split_type,holdout,partition,n,positive,negative,prevalence
+iid,iid,,train,5120,2560,2560,0.5
+iid,iid,,valid,1280,640,640,0.5
+iid,iid,,test,1600,800,800,0.5
+lab_heldout_haib,lab,"Richard Myers, HAIB",train,4800,2400,2400,0.5
+lab_heldout_haib,lab,"Richard Myers, HAIB",valid,1200,600,600,0.5
+lab_heldout_haib,lab,"Richard Myers, HAIB",test,2000,1000,1000,0.5
+family_heldout_zinc_finger,tf_family,zinc_finger,train,4800,2400,2400,0.5
+family_heldout_zinc_finger,tf_family,zinc_finger,valid,1200,600,600,0.5
+family_heldout_zinc_finger,tf_family,zinc_finger,test,2000,1000,1000,0.5

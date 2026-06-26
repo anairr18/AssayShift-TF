@@ -1,0 +1,21 @@
+split,split_type,holdout,model,calibrated,metric,mean,std,min,max,n_seeds
+lab_heldout_haib,lab,"Richard Myers, HAIB",axis_guard_full,False,auprc,0.7126578306900506,0.0,0.7126578306900506,0.7126578306900506,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",axis_guard_full,False,auroc,0.7339926470588235,0.0,0.7339926470588235,0.7339926470588235,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",axis_guard_full,False,ece,0.11611731216377294,0.0,0.11611731216377294,0.11611731216377294,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",axis_guard_full,False,brier,0.22393693320347252,0.0,0.22393693320347252,0.22393693320347252,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",axis_guard_full,False,worst_group_auprc,0.7081707061064763,0.0,0.7081707061064763,0.7081707061064763,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",axis_guard_full,True,auprc,0.7126578306900506,0.0,0.7126578306900506,0.7126578306900506,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",axis_guard_full,True,auroc,0.7339926470588235,0.0,0.7339926470588235,0.7339926470588235,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",axis_guard_full,True,ece,0.03793302705093054,0.0,0.03793302705093054,0.03793302705093054,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",axis_guard_full,True,brier,0.20954084313460833,0.0,0.20954084313460833,0.20954084313460833,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",axis_guard_full,True,worst_group_auprc,0.7081707061064763,0.0,0.7081707061064763,0.7081707061064763,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",tiny_cnn,False,auprc,0.6985849117961794,0.0,0.6985849117961794,0.6985849117961794,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",tiny_cnn,False,auroc,0.7383434873949579,0.0,0.7383434873949579,0.7383434873949579,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",tiny_cnn,False,ece,0.13076055763464908,0.0,0.13076055763464908,0.13076055763464908,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",tiny_cnn,False,brier,0.22566110831668967,0.0,0.22566110831668967,0.22566110831668967,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",tiny_cnn,False,worst_group_auprc,0.697635189693801,0.0,0.697635189693801,0.697635189693801,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",tiny_cnn,True,auprc,0.6985849117961794,0.0,0.6985849117961794,0.6985849117961794,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",tiny_cnn,True,auroc,0.7383434873949579,0.0,0.7383434873949579,0.7383434873949579,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",tiny_cnn,True,ece,0.0915091361085997,0.0,0.0915091361085997,0.0915091361085997,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",tiny_cnn,True,brier,0.21548065488930412,0.0,0.21548065488930412,0.21548065488930412,1
+lab_heldout_haib,lab,"Richard Myers, HAIB",tiny_cnn,True,worst_group_auprc,0.697635189693801,0.0,0.697635189693801,0.697635189693801,1

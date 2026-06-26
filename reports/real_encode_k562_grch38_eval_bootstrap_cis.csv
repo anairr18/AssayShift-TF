@@ -1,0 +1,73 @@
+split,split_type,holdout,model,calibrated,metric,estimate,ci_low,ci_high,n_bootstrap,valid_bootstraps,confidence
+iid,iid,,gc_artifact_logreg,False,auprc,0.6721240318740744,0.6468715942424283,0.7082782523149238,100,100,0.95
+iid,iid,,gc_artifact_logreg,False,auroc,0.7126828125000001,0.6885615826851068,0.7336767196769376,100,100,0.95
+iid,iid,,gc_artifact_logreg,False,ece,0.06030969250054888,0.047542330550929233,0.08778102617088555,100,100,0.95
+iid,iid,,gc_artifact_logreg,False,brier,0.21711505906430595,0.21012514327289095,0.22372442338175474,100,100,0.95
+iid,iid,,gc_artifact_logreg,True,auprc,0.6721240318740744,0.6415252001772469,0.7058319617287001,100,100,0.95
+iid,iid,,gc_artifact_logreg,True,auroc,0.7126828125000001,0.6899501093842013,0.7315525659021115,100,100,0.95
+iid,iid,,gc_artifact_logreg,True,ece,0.06637691306379036,0.05371630049539599,0.09850593371738404,100,100,0.95
+iid,iid,,gc_artifact_logreg,True,brier,0.21780058429500382,0.21098721625157615,0.2260760796138178,100,100,0.95
+iid,iid,,kmer_logreg,False,auprc,0.7541111744456557,0.7246095864440557,0.784818533879014,100,100,0.95
+iid,iid,,kmer_logreg,False,auroc,0.778153125,0.7546031827586611,0.8011814409353074,100,100,0.95
+iid,iid,,kmer_logreg,False,ece,0.11892038399548172,0.10291488359078213,0.1419690125022,100,100,0.95
+iid,iid,,kmer_logreg,False,brier,0.2068399504846477,0.19188110768875416,0.22148222304734844,100,100,0.95
+iid,iid,,kmer_logreg,True,auprc,0.7541111744456557,0.7256522520659591,0.7922321487578857,100,100,0.95
+iid,iid,,kmer_logreg,True,auroc,0.778153125,0.759219805691599,0.7984472574220853,100,100,0.95
+iid,iid,,kmer_logreg,True,ece,0.04016331016807491,0.034982608684969496,0.06776302624465444,100,100,0.95
+iid,iid,,kmer_logreg,True,brier,0.19267891264628847,0.18364099306023218,0.20079504200334355,100,100,0.95
+iid,iid,,kmer_metadata_logreg,False,auprc,0.7532359340122261,0.7232810839442194,0.7907968153712756,100,100,0.95
+iid,iid,,kmer_metadata_logreg,False,auroc,0.777575,0.7601831832955794,0.7997069611849862,100,100,0.95
+iid,iid,,kmer_metadata_logreg,False,ece,0.12210495567090347,0.10582413567167863,0.1404274650374054,100,100,0.95
+iid,iid,,kmer_metadata_logreg,False,brier,0.2079777973082412,0.1946767489160662,0.2190546436155897,100,100,0.95
+iid,iid,,kmer_metadata_logreg,True,auprc,0.7532359340122261,0.7221763807002632,0.7827460952958181,100,100,0.95
+iid,iid,,kmer_metadata_logreg,True,auroc,0.777575,0.75858817557279,0.7942327244458137,100,100,0.95
+iid,iid,,kmer_metadata_logreg,True,ece,0.03971404122030605,0.03446276679455323,0.0673217523168367,100,100,0.95
+iid,iid,,kmer_metadata_logreg,True,brier,0.19264535120939083,0.1852681046613555,0.20087053400381952,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",gc_artifact_logreg,False,auprc,0.5884823539873894,0.5576412073058993,0.6154793807096703,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",gc_artifact_logreg,False,auroc,0.6660375,0.6423916786380038,0.684340747070198,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",gc_artifact_logreg,False,ece,0.11519409656831643,0.09674279243719917,0.1365471974334802,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",gc_artifact_logreg,False,brier,0.23743587228175034,0.23221870364272254,0.24312139788015463,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",gc_artifact_logreg,True,auprc,0.5884823539873894,0.5631150503091558,0.6234063522956922,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",gc_artifact_logreg,True,auroc,0.6660375,0.6430528267929051,0.690612971658057,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",gc_artifact_logreg,True,ece,0.11583874749764665,0.0993230216687503,0.13435878195756198,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",gc_artifact_logreg,True,brier,0.23703310966337313,0.23138782864184643,0.24253066488868988,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",kmer_logreg,False,auprc,0.7423222627664664,0.7164537400700567,0.7664028513414466,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",kmer_logreg,False,auroc,0.7546329999999999,0.7341088037659941,0.7736065255025316,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",kmer_logreg,False,ece,0.12934591978791762,0.11215079563180055,0.147733231353077,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",kmer_logreg,False,brier,0.22238698949177632,0.21013954079202893,0.23379278392339575,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",kmer_logreg,True,auprc,0.7423222627664664,0.7131790707387873,0.7699605593388537,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",kmer_logreg,True,auroc,0.7546329999999999,0.7321741221071969,0.7767230419506315,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",kmer_logreg,True,ece,0.05118695453163257,0.046402506002481955,0.07621096830470034,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",kmer_logreg,True,brier,0.20355950895267788,0.1949669184287887,0.21208148693694234,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",kmer_metadata_logreg,False,auprc,0.7434615000943735,0.7138119856826884,0.7749886833858743,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",kmer_metadata_logreg,False,auroc,0.755158,0.7357235426464255,0.7725949905877103,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",kmer_metadata_logreg,False,ece,0.13547837581209857,0.12243968535424325,0.15946378383190143,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",kmer_metadata_logreg,False,brier,0.2238855275968221,0.21342012679628394,0.23485574268355028,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",kmer_metadata_logreg,True,auprc,0.7434615000943735,0.7094742221280567,0.770742537748639,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",kmer_metadata_logreg,True,auroc,0.755158,0.7306140402672867,0.7721514539450534,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",kmer_metadata_logreg,True,ece,0.055095711960284996,0.042276486550220385,0.07619313717412826,100,100,0.95
+lab_heldout,lab,"Richard Myers, HAIB",kmer_metadata_logreg,True,brier,0.20378333136555762,0.1963212923653202,0.21396604048104637,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,gc_artifact_logreg,False,auprc,0.7218000961945887,0.6927531766755716,0.7491388678612652,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,gc_artifact_logreg,False,auroc,0.7459574999999999,0.7228296849784932,0.7658330569101436,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,gc_artifact_logreg,False,ece,0.04794622023747517,0.038870076541047405,0.06899390907684462,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,gc_artifact_logreg,False,brier,0.20666138159671385,0.20033550720501175,0.21423511269920154,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,gc_artifact_logreg,True,auprc,0.7218000961945887,0.6950142819054462,0.7497599458507022,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,gc_artifact_logreg,True,auroc,0.7459574999999999,0.727795944342974,0.7653471623971017,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,gc_artifact_logreg,True,ece,0.05301479817964282,0.04099353418007127,0.07213660323796922,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,gc_artifact_logreg,True,brier,0.20643443105489168,0.1986455727321037,0.21254488224556115,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,kmer_logreg,False,auprc,0.7320517682607338,0.7063447222746898,0.7593009193050264,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,kmer_logreg,False,auroc,0.735458,0.713936847954137,0.753515375279846,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,kmer_logreg,False,ece,0.15100279710274503,0.13471464771092528,0.17529462223465556,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,kmer_logreg,False,brier,0.23444196671157624,0.22246664158252555,0.24729316012858865,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,kmer_logreg,True,auprc,0.7320517682607338,0.7021106234709334,0.7610122044072514,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,kmer_logreg,True,auroc,0.735458,0.7156110069579656,0.7584255803322607,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,kmer_logreg,True,ece,0.05255415831199382,0.0434009354416758,0.07585575947481053,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,kmer_logreg,True,brier,0.21022439949692295,0.20112973993697217,0.2180857955032067,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,kmer_metadata_logreg,False,auprc,0.7328916383130679,0.7042057036551935,0.766561861463345,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,kmer_metadata_logreg,False,auroc,0.735579,0.712167335372732,0.7588950681716381,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,kmer_metadata_logreg,False,ece,0.15092165705750082,0.13542823391924955,0.17684632823220922,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,kmer_metadata_logreg,False,brier,0.2350687617705816,0.22074341791950833,0.2497064101583649,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,kmer_metadata_logreg,True,auprc,0.7328916383130679,0.6994869104268929,0.7640804998233572,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,kmer_metadata_logreg,True,auroc,0.735579,0.7112399559882406,0.7581394522157872,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,kmer_metadata_logreg,True,ece,0.05173216732478802,0.04522734461631338,0.07512559836885692,100,100,0.95
+family_heldout_zinc_finger,tf_family,zinc_finger,kmer_metadata_logreg,True,brier,0.21044291735968262,0.20100869503431848,0.22057894834612604,100,100,0.95

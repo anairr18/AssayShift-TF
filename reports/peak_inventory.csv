@@ -1,0 +1,15 @@
+dataset_id,intervals,columns,first_chrom,path
+ENCSR000EGM,57244,10,chr22,data\raw\candidate_peaks\ENCSR000EGM__ENCFF396BZQ.bed.gz
+ENCSR744JJU,7275,10,chr3,data\raw\candidate_peaks\ENCSR744JJU__ENCFF043WTJ.bed.gz
+ENCSR000EFV,38430,10,chr4,data\raw\candidate_peaks\ENCSR000EFV__ENCFF618VMC.bed.gz
+ENCSR000EFT,14684,10,chr1,data\raw\candidate_peaks\ENCSR000EFT__ENCFF148JKK.bed.gz
+ENCSR257RKC,15226,10,chr17,data\raw\candidate_peaks\ENCSR257RKC__ENCFF771FRJ.bed.gz
+ENCSR054JMQ,10121,10,chr11,data\raw\candidate_peaks\ENCSR054JMQ__ENCFF572YTS.bed.gz
+ENCSR000EGN,47477,10,chr3,data\raw\candidate_peaks\ENCSR000EGN__ENCFF213EYD.bed.gz
+ENCSR000BGW,32589,10,chr9,data\raw\candidate_peaks\ENCSR000BGW__ENCFF414ECK.bed.gz
+ENCSR865RXA,33273,10,chr2,data\raw\candidate_peaks\ENCSR865RXA__ENCFF235PEX.bed.gz
+ENCSR463GOT,21995,10,chr8,data\raw\candidate_peaks\ENCSR463GOT__ENCFF185UUT.bed.gz
+ENCSR000ERM,60938,10,chr11,data\raw\candidate_peaks\ENCSR000ERM__ENCFF739OMJ.bed.gz
+GSM2433139,6461213,4,chr1,data\raw\candidate_peaks\GSM2433139__download
+GSM2433145,21497377,4,chr1,data\raw\candidate_peaks\GSM2433145__download
+GSM2433146,13806984,4,chr1,data\raw\candidate_peaks\GSM2433146__download

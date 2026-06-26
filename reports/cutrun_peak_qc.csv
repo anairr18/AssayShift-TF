@@ -1,0 +1,4 @@
+tf,path,called_peaks,median_width,median_score,mean_score
+CTCF,data/processed/cutrun_peaks/GSM2433139_CTCF_called.bed,35595,516.0,47.0,104.23966849276584
+MAX,data/processed/cutrun_peaks/GSM2433145_MAX_called.bed,19877,659.0,50.0,886.701816169442
+MYC,data/processed/cutrun_peaks/GSM2433146_MYC_called.bed,9053,604.0,36.0,201.83276262012592

@@ -1,0 +1,27 @@
+[project]
+name = "assayshift-tf"
+version = "0.1.0"
+description = "Protocol-aware TF binding benchmark under assay, lab, species, and family shift."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "biopython",
+  "matplotlib",
+  "numpy",
+  "pandas",
+  "pyarrow",
+  "pyfaidx",
+  "pytest",
+  "scikit-learn",
+  "seaborn",
+]
+
+[project.optional-dependencies]
+deep = ["torch", "transformers"]
+
+[project.scripts]
+assayshift-tf = "assayshift_tf.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

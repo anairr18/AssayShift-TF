@@ -1,0 +1,17 @@
+.pytest_cache/
+__pycache__/
+*.py[cod]
+
+# Large reproducible inputs; keep processed windows in GitHub for Colab.
+data/raw/
+data/references/
+
+# Keep compact reports, but skip bulky per-window prediction dumps.
+reports/*predictions.csv
+reports/demo_dataset.parquet
+reports/demo_predictions.csv
+reports/smoke_*
+reports/*.log
+
+# Local packaging artifacts.
+*.zip

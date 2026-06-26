@@ -1,0 +1,72 @@
+flowchart LR
+    subgraph Sources["Data Sources"]
+        ENCODE["ENCODE / public TF binding assays"]
+        Peaks["Peak calls and labels"]
+        Seq["Reference genome sequences"]
+        Meta["Metadata: assay, lab, species, TF, family, cell context"]
+    end
+
+    subgraph Harmonize["Dataset Harmonization"]
+        Windows["Sequence windows"]
+        Labels["Binary binding labels"]
+        Families["TF-family annotation"]
+        QC["QC and missing metadata flags"]
+    end
+
+    subgraph Splits["Protocol-Aware Splits"]
+        IID["In-distribution control"]
+        Assay["Held-out assay or protocol"]
+        Lab["Held-out lab or source"]
+        Species["Held-out species"]
+        TFFam["Held-out TF family"]
+    end
+
+    subgraph Models["Models"]
+        Kmer["k-mer / logistic baseline"]
+        CNN["sequence CNN"]
+        Embed["sequence embedding model"]
+        Protocol["metadata-conditioned variant"]
+    end
+
+    subgraph Reliability["Calibration and Selective Prediction"]
+        Cal["temperature / isotonic calibration"]
+        Coverage["risk-coverage analysis"]
+        Abstain["abstention thresholding"]
+    end
+
+    subgraph Report["Shift Metrics and Failure Analysis"]
+        Metrics["AUROC, AUPRC, Brier, ECE"]
+        Worst["worst-group performance"]
+        Failure["errors by motif, GC, assay, lab, species, TF family"]
+        Claims["paper-ready tables and figures"]
+    end
+
+    ENCODE --> Peaks
+    Peaks --> Labels
+    Seq --> Windows
+    Meta --> Families
+    Meta --> QC
+    Windows --> IID
+    Labels --> IID
+    Families --> TFFam
+    QC --> Assay
+    QC --> Lab
+    QC --> Species
+
+    IID --> Kmer
+    Assay --> CNN
+    Lab --> Embed
+    Species --> Protocol
+    TFFam --> Protocol
+
+    Kmer --> Cal
+    CNN --> Cal
+    Embed --> Cal
+    Protocol --> Cal
+    Cal --> Coverage
+    Coverage --> Abstain
+
+    Abstain --> Metrics
+    Metrics --> Worst
+    Worst --> Failure
+    Failure --> Claims

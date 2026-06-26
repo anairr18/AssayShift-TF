@@ -1,0 +1,7 @@
+dataset_id,status,path,bytes
+ENCSR000EGM,ok,data\raw\assay_mvp_hg19_inputs\ENCSR000EGM__ENCFF002CWL.bed.gz,1125159
+ENCSR000EFV,ok,data\raw\assay_mvp_hg19_inputs\ENCSR000EFV__ENCFF002CXD.bed.gz,633651
+ENCSR000EGS,ok,data\raw\assay_mvp_hg19_inputs\ENCSR000EGS__ENCFF002CWF.bed.gz,680076
+GSM2433139,ok,data\processed\cutrun_peaks\GSM2433139_CTCF_called.bed,3961777
+GSM2433145,ok,data\processed\cutrun_peaks\GSM2433145_MAX_called.bed,2176382
+GSM2433146,ok,data\processed\cutrun_peaks\GSM2433146_MYC_called.bed,983505
