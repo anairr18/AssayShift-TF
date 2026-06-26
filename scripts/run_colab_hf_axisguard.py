@@ -10,7 +10,7 @@ import torch
 from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoConfig, AutoModel, AutoTokenizer
 
 from assayshift_tf.benchmark import (
     _mask_leaky_metadata,
@@ -25,6 +25,20 @@ from assayshift_tf.splits import make_split
 
 
 RC_TRANS = str.maketrans("ACGTNacgtn", "TGCANtgcan")
+
+
+def load_hf_encoder(hf_model: str, *, trust_remote_code: bool) -> nn.Module:
+    config = AutoConfig.from_pretrained(hf_model, trust_remote_code=trust_remote_code)
+    # Newer Transformers ESM implementations expect RoPE attributes that older
+    # Nucleotide Transformer configs do not serialize. Fill conservative defaults
+    # before model construction so Colab's preinstalled stack remains usable.
+    if not hasattr(config, "rope_theta"):
+        config.rope_theta = 10000.0
+    if not hasattr(config, "partial_rotary_factor"):
+        config.partial_rotary_factor = 1.0
+    if not hasattr(config, "head_dim") and hasattr(config, "hidden_size") and hasattr(config, "num_attention_heads"):
+        config.head_dim = config.hidden_size // config.num_attention_heads
+    return AutoModel.from_pretrained(hf_model, config=config, trust_remote_code=trust_remote_code)
 
 
 def reverse_complement(sequence: str) -> str:
@@ -121,7 +135,7 @@ class HFAxisGuard(nn.Module):
         trust_remote_code: bool = False,
     ) -> None:
         super().__init__()
-        self.encoder = AutoModel.from_pretrained(hf_model, trust_remote_code=trust_remote_code)
+        self.encoder = load_hf_encoder(hf_model, trust_remote_code=trust_remote_code)
         if freeze_backbone:
             for param in self.encoder.parameters():
                 param.requires_grad = False
