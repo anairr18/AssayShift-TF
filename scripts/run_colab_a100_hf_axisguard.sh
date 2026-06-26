@@ -10,6 +10,7 @@ python -m pip install -e ".[deep]"
 HF_MODEL="${HF_MODEL:-InstaDeepAI/nucleotide-transformer-v2-50m-multi-species}"
 COMMON_ARGS=(
   --hf-model "$HF_MODEL"
+  --trust-remote-code
   --model-name hf_axis_guard_nt
   --seed 13 --seed 17 --seed 23
   --epochs 8
