@@ -3,7 +3,16 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from assayshift_tf.benchmark import parse_split_spec, run_demo, run_real_data_evaluation, run_real_seed_sweep
+from assayshift_tf.benchmark import (
+    _prepare_window_frame,
+    _read_window_table,
+    filter_window_frame,
+    parse_split_spec,
+    run_demo,
+    run_real_data_evaluation,
+    run_real_seed_sweep,
+)
+from assayshift_tf.embeddings import write_hf_embedding_cache
 from assayshift_tf.manifest import load_manifest, validate_manifest
 from assayshift_tf.models import model_spec_from_name
 from assayshift_tf.peaks import build_sequence_table, call_cutrun_peaks, download_peak_files, write_cutrun_peaks
@@ -28,9 +37,20 @@ def _model_specs_from_args(args: argparse.Namespace, seed: int):
             deep_lr=args.deep_lr,
             deep_device=args.deep_device,
             axis_dropout=args.axis_dropout,
+            counterfactual_mode=args.counterfactual_mode,
             counterfactual_weight=args.counterfactual_weight,
             metadata_residual_weight=args.metadata_residual_weight,
             adversarial_weight=args.adversarial_weight,
+            deep_objective=args.deep_objective,
+            group_key=args.group_key,
+            groupdro_eta=args.groupdro_eta,
+            protocol_penalty=args.protocol_penalty,
+            protocol_penalty_weight=args.protocol_penalty_weight,
+            rc_augment=args.rc_augment,
+            rc_ensemble=args.rc_ensemble,
+            embedding_cache=args.embedding_cache,
+            embedding_head=args.embedding_head,
+            embedding_include_metadata=args.embedding_include_metadata,
             random_state=seed,
         )
         for model in args.model
@@ -49,6 +69,8 @@ def _cmd_evaluate_real(args: argparse.Namespace) -> int:
         random_seed=args.seed,
         bootstrap_iterations=args.bootstrap,
         ci_confidence=args.confidence,
+        calibration_method=args.calibration,
+        calibration_group=args.calibration_group,
         drop_all_n=args.drop_all_n,
         drop_duplicate_sequences=args.drop_duplicate_sequences,
     )
@@ -68,11 +90,34 @@ def _cmd_sweep_real(args: argparse.Namespace) -> int:
         seeds=seeds,
         bootstrap_iterations=args.bootstrap,
         ci_confidence=args.confidence,
+        calibration_method=args.calibration,
+        calibration_group=args.calibration_group,
         drop_all_n=args.drop_all_n,
         drop_duplicate_sequences=args.drop_duplicate_sequences,
     )
     for name, path in paths.items():
         print(f"{name}: {path}")
+    return 0
+
+
+def _cmd_embed(args: argparse.Namespace) -> int:
+    filter_artifacts = filter_window_frame(
+        _prepare_window_frame(_read_window_table(args.window_table)),
+        drop_all_n=args.drop_all_n,
+        drop_duplicate_sequences=args.drop_duplicate_sequences,
+    )
+    path = write_hf_embedding_cache(
+        filter_artifacts.frame,
+        args.out,
+        hf_model=args.hf_model,
+        batch_size=args.batch_size,
+        device=args.device,
+        max_tokens=args.max_tokens,
+        pooling=args.pooling,
+        trust_remote_code=args.trust_remote_code,
+        limit=args.limit,
+    )
+    print(f"embedding_cache: {path}")
     return 0
 
 
@@ -179,13 +224,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     real.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap replicates for metric CIs.")
     real.add_argument("--confidence", type=float, default=0.95, help="Bootstrap CI confidence level.")
+    real.add_argument("--calibration", choices=["platt", "protocol_platt"], default="platt")
+    real.add_argument("--calibration-group", default="auto", help="Group column for protocol_platt, or auto.")
     real.add_argument("--seed", type=int, default=13)
     real.add_argument(
         "--model",
         action="append",
         help=(
             "Model to run; repeatable. Choices include gc, kmer, kmer_metadata, tiny_cnn, "
-            "axis_guard_cnn, axis_guard_no_cf, axis_guard_no_resid, axis_guard_no_adv, axis_guard_full. "
+            "axis_guard_cnn, axis_guard_no_cf, axis_guard_no_resid, axis_guard_no_adv, axis_guard_full, "
+            "embedding_head, embedding_logreg, embedding_mlp, embedding_metadata. "
             "Defaults to the fast logistic baselines."
         ),
     )
@@ -195,10 +243,16 @@ def build_parser() -> argparse.ArgumentParser:
     real.add_argument("--deep-device", default=None, help="Deep model device: auto, cpu, or cuda.")
     real.add_argument("--axis-dropout", type=float, default=None, help="Protocol metadata dropout for axis_guard_cnn.")
     real.add_argument(
+        "--counterfactual-mode",
+        choices=["mask", "shuffle", "mask_or_shuffle"],
+        default=None,
+        help="Counterfactual protocol perturbation for axis_guard_cnn.",
+    )
+    real.add_argument(
         "--counterfactual-weight",
         type=float,
         default=None,
-        help="Prediction-consistency penalty weight for counterfactual protocol masking.",
+        help="Prediction-consistency penalty weight for counterfactual protocol perturbation.",
     )
     real.add_argument(
         "--metadata-residual-weight",
@@ -211,6 +265,21 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Optional gradient-reversal assay/lab adversary weight for axis_guard_cnn.",
+    )
+    real.add_argument("--deep-objective", choices=["erm", "groupdro"], default=None)
+    real.add_argument("--group-key", default=None, help="Group column for GroupDRO/alignment, or protocol.")
+    real.add_argument("--groupdro-eta", type=float, default=None, help="Exponentiated-gradient step for GroupDRO.")
+    real.add_argument("--protocol-penalty", choices=["none", "coral", "mmd"], default=None)
+    real.add_argument("--protocol-penalty-weight", type=float, default=None)
+    real.add_argument("--rc-augment", action="store_true", help="Augment deep-model training rows with reverse complements.")
+    real.add_argument("--rc-ensemble", action="store_true", help="Average deep-model predictions with reverse complements.")
+    real.add_argument("--embedding-cache", type=Path, default=None, help="NPZ cache for embedding_head models.")
+    real.add_argument("--embedding-head", choices=["logreg", "mlp"], default=None)
+    real.add_argument(
+        "--embedding-include-metadata",
+        action="store_true",
+        default=None,
+        help="Append safe metadata features to frozen embeddings for embedding_head models.",
     )
     real.add_argument("--drop-all-n", action="store_true", help="Drop windows whose sequence is entirely N bases.")
     real.add_argument(
@@ -233,6 +302,8 @@ def build_parser() -> argparse.ArgumentParser:
     sweep.add_argument("--seed", action="append", type=int, help="Seed to run; repeatable. Defaults to 5 seeds.")
     sweep.add_argument("--bootstrap", type=int, default=0, help="Bootstrap replicates per seed; usually 0 for sweeps.")
     sweep.add_argument("--confidence", type=float, default=0.95, help="Bootstrap CI confidence level.")
+    sweep.add_argument("--calibration", choices=["platt", "protocol_platt"], default="platt")
+    sweep.add_argument("--calibration-group", default="auto", help="Group column for protocol_platt, or auto.")
     sweep.add_argument(
         "--model",
         action="append",
@@ -246,9 +317,30 @@ def build_parser() -> argparse.ArgumentParser:
     sweep.add_argument("--deep-lr", type=float, default=None, help="Learning rate for deep models.")
     sweep.add_argument("--deep-device", default=None, help="Deep model device: auto, cpu, or cuda.")
     sweep.add_argument("--axis-dropout", type=float, default=None, help="Protocol metadata dropout for axis_guard_cnn.")
+    sweep.add_argument(
+        "--counterfactual-mode",
+        choices=["mask", "shuffle", "mask_or_shuffle"],
+        default=None,
+        help="Counterfactual protocol perturbation for axis_guard_cnn.",
+    )
     sweep.add_argument("--counterfactual-weight", type=float, default=None)
     sweep.add_argument("--metadata-residual-weight", type=float, default=None)
     sweep.add_argument("--adversarial-weight", type=float, default=None)
+    sweep.add_argument("--deep-objective", choices=["erm", "groupdro"], default=None)
+    sweep.add_argument("--group-key", default=None, help="Group column for GroupDRO/alignment, or protocol.")
+    sweep.add_argument("--groupdro-eta", type=float, default=None, help="Exponentiated-gradient step for GroupDRO.")
+    sweep.add_argument("--protocol-penalty", choices=["none", "coral", "mmd"], default=None)
+    sweep.add_argument("--protocol-penalty-weight", type=float, default=None)
+    sweep.add_argument("--rc-augment", action="store_true", help="Augment deep-model training rows with reverse complements.")
+    sweep.add_argument("--rc-ensemble", action="store_true", help="Average deep-model predictions with reverse complements.")
+    sweep.add_argument("--embedding-cache", type=Path, default=None, help="NPZ cache for embedding_head models.")
+    sweep.add_argument("--embedding-head", choices=["logreg", "mlp"], default=None)
+    sweep.add_argument(
+        "--embedding-include-metadata",
+        action="store_true",
+        default=None,
+        help="Append safe metadata features to frozen embeddings for embedding_head models.",
+    )
     sweep.add_argument("--drop-all-n", action="store_true", help="Drop windows whose sequence is entirely N bases.")
     sweep.add_argument(
         "--drop-duplicate-sequences",
@@ -256,6 +348,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Drop exact duplicate sequence strings before splitting to reduce sequence leakage.",
     )
     sweep.set_defaults(func=_cmd_sweep_real)
+
+    embed = sub.add_parser("embed", help="Cache frozen HF DNA sequence embeddings keyed by example_id.")
+    embed.add_argument("window_table", type=Path, help="CSV, TSV, or Parquet table with example_id and sequence columns.")
+    embed.add_argument("--out", type=Path, required=True, help="Output .npz embedding cache.")
+    embed.add_argument("--hf-model", required=True, help="HF encoder/model id.")
+    embed.add_argument("--batch-size", type=int, default=32)
+    embed.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    embed.add_argument("--max-tokens", type=int, default=256)
+    embed.add_argument("--pooling", choices=["mean", "cls", "max"], default="mean")
+    embed.add_argument("--trust-remote-code", action="store_true")
+    embed.add_argument("--limit", type=int, default=None, help="Optional first-N rows smoke-test limit.")
+    embed.add_argument("--drop-all-n", action="store_true", help="Drop windows whose sequence is entirely N bases.")
+    embed.add_argument("--drop-duplicate-sequences", action="store_true")
+    embed.set_defaults(func=_cmd_embed)
 
     manifest = sub.add_parser("validate-manifest", help="Validate dataset manifest columns.")
     manifest.add_argument("path", type=Path)

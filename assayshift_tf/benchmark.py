@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from itertools import permutations
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from assayshift_tf.datasets import DemoConfig, make_demo_dataset
 from assayshift_tf.features import add_sequence_stats
 from assayshift_tf.metrics import (
     PlattCalibrator,
+    ProtocolPlattCalibrator,
     binary_metrics,
     bootstrap_metric_cis,
     group_metrics,
@@ -34,6 +37,7 @@ class EvaluationArtifacts:
     predictions: pd.DataFrame
     bootstrap_cis: pd.DataFrame
     split_counts: pd.DataFrame
+    calibration: pd.DataFrame
 
 
 @dataclass(frozen=True)
@@ -84,10 +88,266 @@ PREDICTION_OPTIONAL_COLUMNS = [
     "n_fraction",
     "length",
 ]
+PAIRWISE_RESULT_METRICS = ("auprc", "auroc", "ece", "brier", "worst_group_auprc")
+PAIRWISE_SELECTIVE_METRICS = ("auprc", "auroc", "ece", "brier")
+PAIRWISE_METRIC_DIRECTIONS = {
+    "auprc": "higher",
+    "auroc": "higher",
+    "worst_group_auprc": "higher",
+    "ece": "lower",
+    "brier": "lower",
+}
+
+
+def _pairwise_delta_columns(id_cols: list[str]) -> list[str]:
+    return [
+        *id_cols,
+        "model_a",
+        "model_b",
+        "metric",
+        "direction",
+        "model_a_value",
+        "model_b_value",
+        "delta",
+        "delta_favors_model_a",
+        "better_model",
+    ]
+
+
+def pairwise_metric_deltas(frame: pd.DataFrame, metrics: tuple[str, ...]) -> pd.DataFrame:
+    """Directed model-vs-model metric deltas from an already-scored results table."""
+    id_cols = [
+        col
+        for col in ["seed", "split", "split_type", "holdout", "calibrated", "coverage"]
+        if col in frame.columns
+    ]
+    columns = _pairwise_delta_columns(id_cols)
+    if frame.empty or "model" not in frame.columns:
+        return pd.DataFrame(columns=columns)
+
+    rows: list[dict[str, object]] = []
+    grouped = frame.groupby(id_cols, dropna=False) if id_cols else [((), frame)]
+    for keys, group in grouped:
+        key_values = keys if isinstance(keys, tuple) else (keys,)
+        base = dict(zip(id_cols, key_values, strict=False))
+        models = list(dict.fromkeys(group["model"].astype(str).tolist()))
+        if len(models) < 2:
+            continue
+        by_model = {str(row.model): row for row in group.itertuples(index=False)}
+        for model_a, model_b in permutations(models, 2):
+            row_a = by_model[model_a]
+            row_b = by_model[model_b]
+            for metric in metrics:
+                if metric not in group.columns:
+                    continue
+                value_a = pd.to_numeric(getattr(row_a, metric), errors="coerce")
+                value_b = pd.to_numeric(getattr(row_b, metric), errors="coerce")
+                delta = float(value_a - value_b) if not (pd.isna(value_a) or pd.isna(value_b)) else float("nan")
+                direction = PAIRWISE_METRIC_DIRECTIONS.get(metric, "higher")
+                favors_a = (
+                    delta > 0
+                    if direction == "higher"
+                    else delta < 0
+                    if direction == "lower"
+                    else False
+                )
+                better_model = ""
+                if not pd.isna(delta) and delta != 0:
+                    better_model = model_a if favors_a else model_b
+                rows.append(
+                    {
+                        **base,
+                        "model_a": model_a,
+                        "model_b": model_b,
+                        "metric": metric,
+                        "direction": direction,
+                        "model_a_value": float(value_a) if not pd.isna(value_a) else float("nan"),
+                        "model_b_value": float(value_b) if not pd.isna(value_b) else float("nan"),
+                        "delta": delta,
+                        "delta_favors_model_a": bool(favors_a),
+                        "better_model": better_model,
+                    }
+                )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def summarize_pairwise_deltas(deltas: pd.DataFrame) -> pd.DataFrame:
+    """Summarize directed pairwise deltas across seeds."""
+    id_cols = [
+        col
+        for col in ["split", "split_type", "holdout", "calibrated", "coverage", "model_a", "model_b", "metric", "direction"]
+        if col in deltas.columns
+    ]
+    columns = [
+        *id_cols,
+        "mean_delta",
+        "std_delta",
+        "min_delta",
+        "max_delta",
+        "n",
+        "n_seeds",
+        "model_a_win_rate",
+        "mean_delta_favors_model_a",
+    ]
+    if deltas.empty:
+        return pd.DataFrame(columns=columns)
+
+    rows: list[dict[str, object]] = []
+    for keys, group in deltas.groupby(id_cols, dropna=False):
+        key_values = keys if isinstance(keys, tuple) else (keys,)
+        base = dict(zip(id_cols, key_values, strict=False))
+        values = pd.to_numeric(group["delta"], errors="coerce").dropna()
+        favors = group.loc[values.index, "delta_favors_model_a"].astype(float) if not values.empty else pd.Series(dtype=float)
+        rows.append(
+            {
+                **base,
+                "mean_delta": float(values.mean()) if not values.empty else float("nan"),
+                "std_delta": float(values.std(ddof=1)) if len(values) > 1 else 0.0,
+                "min_delta": float(values.min()) if not values.empty else float("nan"),
+                "max_delta": float(values.max()) if not values.empty else float("nan"),
+                "n": int(values.shape[0]),
+                "n_seeds": int(group["seed"].nunique()) if "seed" in group.columns else int(values.shape[0]),
+                "model_a_win_rate": float(favors.mean()) if not favors.empty else float("nan"),
+                "mean_delta_favors_model_a": bool(values.mean() > 0)
+                if base.get("direction", "higher") == "higher" and not values.empty
+                else bool(values.mean() < 0)
+                if base.get("direction") == "lower" and not values.empty
+                else False,
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def paired_prediction_delta_cis(
+    predictions: pd.DataFrame,
+    split_meta: pd.DataFrame,
+    *,
+    metrics: tuple[str, ...] = PAIRWISE_SELECTIVE_METRICS,
+    n_bootstrap: int = 1000,
+    confidence: float = 0.95,
+    random_state: int = 13,
+) -> pd.DataFrame:
+    """Paired bootstrap CIs for directed model deltas on identical test examples."""
+    columns = [
+        "split",
+        "split_type",
+        "holdout",
+        "calibrated",
+        "model_a",
+        "model_b",
+        "metric",
+        "direction",
+        "model_a_value",
+        "model_b_value",
+        "delta",
+        "ci_low",
+        "ci_high",
+        "n_bootstrap",
+        "valid_bootstraps",
+        "confidence",
+        "delta_favors_model_a",
+        "better_model",
+    ]
+    if predictions.empty or n_bootstrap <= 0:
+        return pd.DataFrame(columns=columns)
+    if not 0 < confidence < 1:
+        raise ValueError("confidence must be in (0, 1)")
+
+    meta = split_meta.drop_duplicates("split").set_index("split") if not split_meta.empty else pd.DataFrame()
+    rows: list[dict[str, object]] = []
+    rng = np.random.default_rng(random_state)
+    for (split_name, calibrated), group in predictions.groupby(["split_name", "calibrated"], dropna=False):
+        models = list(dict.fromkeys(group["model"].astype(str).tolist()))
+        if len(models) < 2:
+            continue
+        model_frames = {
+            model: (
+                group.loc[group["model"].astype(str).eq(model), ["example_id", "label", "prob"]]
+                .drop_duplicates("example_id")
+                .rename(columns={"prob": f"prob_{model}"})
+            )
+            for model in models
+        }
+        for model_a, model_b in permutations(models, 2):
+            aligned = model_frames[model_a].merge(
+                model_frames[model_b],
+                on=["example_id", "label"],
+                how="inner",
+            )
+            if aligned.empty:
+                continue
+            y = aligned["label"].to_numpy(dtype=float)
+            prob_a = aligned[f"prob_{model_a}"].to_numpy(dtype=float)
+            prob_b = aligned[f"prob_{model_b}"].to_numpy(dtype=float)
+            estimate_a = binary_metrics(y, prob_a)
+            estimate_b = binary_metrics(y, prob_b)
+            boot_values: dict[str, list[float]] = {metric: [] for metric in metrics}
+            for _ in range(n_bootstrap):
+                idx = rng.integers(0, len(y), size=len(y))
+                metrics_a = binary_metrics(y[idx], prob_a[idx])
+                metrics_b = binary_metrics(y[idx], prob_b[idx])
+                for metric in metrics:
+                    value_a = metrics_a.get(metric, float("nan"))
+                    value_b = metrics_b.get(metric, float("nan"))
+                    if not (pd.isna(value_a) or pd.isna(value_b)):
+                        boot_values[metric].append(float(value_a - value_b))
+
+            alpha = 1.0 - confidence
+            split_type = meta.loc[split_name, "split_type"] if not meta.empty and split_name in meta.index else ""
+            holdout = meta.loc[split_name, "holdout"] if not meta.empty and split_name in meta.index else ""
+            for metric in metrics:
+                value_a = estimate_a.get(metric, float("nan"))
+                value_b = estimate_b.get(metric, float("nan"))
+                delta = float(value_a - value_b) if not (pd.isna(value_a) or pd.isna(value_b)) else float("nan")
+                boot = np.asarray(boot_values[metric], dtype=float)
+                ci_low = float(np.quantile(boot, alpha / 2.0)) if boot.size else float("nan")
+                ci_high = float(np.quantile(boot, 1.0 - alpha / 2.0)) if boot.size else float("nan")
+                direction = PAIRWISE_METRIC_DIRECTIONS.get(metric, "higher")
+                favors_a = (
+                    delta > 0
+                    if direction == "higher"
+                    else delta < 0
+                    if direction == "lower"
+                    else False
+                )
+                rows.append(
+                    {
+                        "split": split_name,
+                        "split_type": split_type,
+                        "holdout": holdout if holdout is not None else "",
+                        "calibrated": calibrated,
+                        "model_a": model_a,
+                        "model_b": model_b,
+                        "metric": metric,
+                        "direction": direction,
+                        "model_a_value": float(value_a) if not pd.isna(value_a) else float("nan"),
+                        "model_b_value": float(value_b) if not pd.isna(value_b) else float("nan"),
+                        "delta": delta,
+                        "ci_low": ci_low,
+                        "ci_high": ci_high,
+                        "n_bootstrap": int(n_bootstrap),
+                        "valid_bootstraps": int(boot.size),
+                        "confidence": float(confidence),
+                        "delta_favors_model_a": bool(favors_a),
+                        "better_model": model_a if favors_a else model_b if not pd.isna(delta) and delta != 0 else "",
+                    }
+                )
+    return pd.DataFrame(rows, columns=columns)
 
 
 def _predict_positive(model, frame: pd.DataFrame) -> pd.Series:
     return pd.Series(model.predict_proba(frame)[:, 1], index=frame.index)
+
+
+def _calibration_group_column(frame: pd.DataFrame, split_spec: SplitSpec, requested: str) -> str | None:
+    if requested != "auto":
+        return requested if requested in frame.columns else None
+    if split_spec.split_type in {"assay", "lab", "species", "tf", "tf_family"} and split_spec.split_type in frame.columns:
+        return split_spec.split_type
+    for col in ("assay", "lab", "species", "tf_family", "tf"):
+        if col in frame.columns:
+            return col
+    return None
 
 
 def _read_window_table(path: str | Path) -> pd.DataFrame:
@@ -195,6 +455,9 @@ def _prediction_columns(frame: pd.DataFrame) -> list[str]:
 
 def _mask_leaky_metadata(frame: pd.DataFrame, split_spec: SplitSpec) -> pd.DataFrame:
     out = frame.copy()
+    for col in ("assay", "lab", "species", "tf", "tf_family"):
+        if col in out.columns and f"__group_{col}" not in out.columns:
+            out[f"__group_{col}"] = out[col]
     mask_cols = {
         "assay": ["assay", "lab"],
         "lab": ["lab"],
@@ -250,6 +513,8 @@ def evaluate_frame_full(
     random_state: int = 13,
     bootstrap_iterations: int = 0,
     ci_confidence: float = 0.95,
+    calibration_method: str = "platt",
+    calibration_group: str = "auto",
 ) -> EvaluationArtifacts:
     split_specs = DEFAULT_SPLITS if split_specs is None else split_specs
     model_specs = DEFAULT_MODELS if model_specs is None else model_specs
@@ -260,6 +525,7 @@ def evaluate_frame_full(
     prediction_rows: list[pd.DataFrame] = []
     ci_rows: list[pd.DataFrame] = []
     split_count_rows: list[dict[str, object]] = []
+    calibration_rows: list[pd.DataFrame] = []
 
     for split_idx, raw_split_spec in enumerate(split_specs):
         split_spec = _resolve_split_spec(frame, raw_split_spec)
@@ -289,8 +555,37 @@ def evaluate_frame_full(
             model.fit(train, train["label"])
             valid_prob = _predict_positive(model, valid)
             test_prob = _predict_positive(model, test)
-            calibrator = PlattCalibrator().fit(valid_prob, valid["label"])
-            test_prob_calibrated = calibrator.predict(test_prob)
+            group_col = _calibration_group_column(valid_original, split_spec, calibration_group)
+            if calibration_method == "protocol_platt" and group_col is not None:
+                calibrator = ProtocolPlattCalibrator(group_col).fit(
+                    valid_prob,
+                    valid_original["label"],
+                    valid_original[group_col],
+                )
+                test_prob_calibrated = calibrator.predict(test_prob, test_original[group_col])
+                calibration_report = calibrator.report(test_original[group_col])
+            elif calibration_method == "platt":
+                calibrator = PlattCalibrator().fit(valid_prob, valid["label"])
+                test_prob_calibrated = calibrator.predict(test_prob)
+                calibration_report = pd.DataFrame(
+                    [
+                        {
+                            "calibration_group_col": "__global__",
+                            "calibration_group": "__global__",
+                            "fit_n": int(len(valid_original)),
+                            "test_n": int(len(test_original)),
+                            "used_group_specific": False,
+                        }
+                    ]
+                )
+            else:
+                raise ValueError("calibration_method must be one of: platt, protocol_platt")
+            calibration_report.insert(0, "model", model_spec.name)
+            calibration_report.insert(0, "holdout", split_spec.holdout if split_spec.holdout is not None else "")
+            calibration_report.insert(0, "split_type", split_spec.split_type)
+            calibration_report.insert(0, "split", split_spec.name)
+            calibration_report.insert(0, "calibration_method", calibration_method)
+            calibration_rows.append(calibration_report)
 
             for calibrated, prob in [(False, test_prob), (True, test_prob_calibrated)]:
                 pred_frame = test_original.copy()
@@ -345,7 +640,8 @@ def evaluate_frame_full(
     predictions = pd.concat(prediction_rows, ignore_index=True) if prediction_rows else pd.DataFrame()
     bootstrap_cis = pd.concat(ci_rows, ignore_index=True) if ci_rows else pd.DataFrame()
     split_counts = pd.DataFrame(split_count_rows)
-    return EvaluationArtifacts(results, groups, selective, predictions, bootstrap_cis, split_counts)
+    calibration = pd.concat(calibration_rows, ignore_index=True) if calibration_rows else pd.DataFrame()
+    return EvaluationArtifacts(results, groups, selective, predictions, bootstrap_cis, split_counts, calibration)
 
 
 def evaluate_frame(
@@ -414,6 +710,8 @@ def run_real_data_evaluation(
     random_seed: int = 13,
     bootstrap_iterations: int = 1000,
     ci_confidence: float = 0.95,
+    calibration_method: str = "platt",
+    calibration_group: str = "auto",
     drop_all_n: bool = False,
     drop_duplicate_sequences: bool = False,
 ) -> dict[str, Path]:
@@ -435,6 +733,8 @@ def run_real_data_evaluation(
         random_state=random_seed,
         bootstrap_iterations=bootstrap_iterations,
         ci_confidence=ci_confidence,
+        calibration_method=calibration_method,
+        calibration_group=calibration_group,
     )
 
     paths = {
@@ -443,6 +743,10 @@ def run_real_data_evaluation(
         "selective": out_path / f"{prefix}_selective.csv",
         "predictions": out_path / f"{prefix}_predictions.csv",
         "bootstrap_cis": out_path / f"{prefix}_bootstrap_cis.csv",
+        "pairwise_deltas": out_path / f"{prefix}_pairwise_deltas.csv",
+        "pairwise_delta_cis": out_path / f"{prefix}_pairwise_delta_cis.csv",
+        "selective_pairwise_deltas": out_path / f"{prefix}_selective_pairwise_deltas.csv",
+        "calibration_report": out_path / f"{prefix}_calibration_report.csv",
         "split_counts": out_path / f"{prefix}_split_counts.csv",
         "window_filter_report": out_path / f"{prefix}_window_filter_report.csv",
         "summary": out_path / f"{prefix}_preliminary_results.md",
@@ -455,6 +759,19 @@ def run_real_data_evaluation(
     artifacts.selective.to_csv(paths["selective"], index=False)
     artifacts.predictions.to_csv(paths["predictions"], index=False)
     artifacts.bootstrap_cis.to_csv(paths["bootstrap_cis"], index=False)
+    pairwise_metric_deltas(artifacts.results, PAIRWISE_RESULT_METRICS).to_csv(paths["pairwise_deltas"], index=False)
+    paired_prediction_delta_cis(
+        artifacts.predictions,
+        artifacts.results[["split", "split_type", "holdout"]],
+        n_bootstrap=bootstrap_iterations,
+        confidence=ci_confidence,
+        random_state=random_seed + 77_777,
+    ).to_csv(paths["pairwise_delta_cis"], index=False)
+    pairwise_metric_deltas(artifacts.selective, PAIRWISE_SELECTIVE_METRICS).to_csv(
+        paths["selective_pairwise_deltas"],
+        index=False,
+    )
+    artifacts.calibration.to_csv(paths["calibration_report"], index=False)
     artifacts.split_counts.to_csv(paths["split_counts"], index=False)
     filter_artifacts.report.to_csv(paths["window_filter_report"], index=False)
 
@@ -511,6 +828,8 @@ def run_real_seed_sweep(
     seeds: list[int] | None = None,
     bootstrap_iterations: int = 0,
     ci_confidence: float = 0.95,
+    calibration_method: str = "platt",
+    calibration_group: str = "auto",
     drop_all_n: bool = False,
     drop_duplicate_sequences: bool = False,
 ) -> dict[str, Path]:
@@ -528,6 +847,11 @@ def run_real_seed_sweep(
         "seed_selective": out_path / f"{prefix}_seed_selective.csv",
         "seed_split_counts": out_path / f"{prefix}_seed_split_counts.csv",
         "seed_bootstrap_cis": out_path / f"{prefix}_seed_bootstrap_cis.csv",
+        "seed_pairwise_deltas": out_path / f"{prefix}_seed_pairwise_deltas.csv",
+        "seed_pairwise_delta_summary": out_path / f"{prefix}_seed_pairwise_delta_summary.csv",
+        "seed_selective_pairwise_deltas": out_path / f"{prefix}_seed_selective_pairwise_deltas.csv",
+        "seed_selective_pairwise_delta_summary": out_path / f"{prefix}_seed_selective_pairwise_delta_summary.csv",
+        "seed_calibration_report": out_path / f"{prefix}_seed_calibration_report.csv",
         "seed_result_summary": out_path / f"{prefix}_seed_result_summary.csv",
         "seed_selective_summary": out_path / f"{prefix}_seed_selective_summary.csv",
         "window_filter_report": out_path / f"{prefix}_window_filter_report.csv",
@@ -538,6 +862,7 @@ def run_real_seed_sweep(
     selective_frames: list[pd.DataFrame] = []
     split_count_frames: list[pd.DataFrame] = []
     ci_frames: list[pd.DataFrame] = []
+    calibration_frames: list[pd.DataFrame] = []
     for seed_idx, seed in enumerate(seeds, start=1):
         print(f"[sweep-real] seed {seed_idx}/{len(seeds)} = {seed}", flush=True)
         seeded_specs = None
@@ -552,9 +877,20 @@ def run_real_seed_sweep(
                     deep_lr=spec.deep_lr,
                     deep_device=spec.deep_device,
                     axis_dropout=spec.axis_dropout,
+                    counterfactual_mode=spec.counterfactual_mode,
                     counterfactual_weight=spec.counterfactual_weight,
                     metadata_residual_weight=spec.metadata_residual_weight,
                     adversarial_weight=spec.adversarial_weight,
+                    deep_objective=spec.deep_objective,
+                    group_key=spec.group_key,
+                    groupdro_eta=spec.groupdro_eta,
+                    protocol_penalty=spec.protocol_penalty,
+                    protocol_penalty_weight=spec.protocol_penalty_weight,
+                    rc_augment=spec.rc_augment,
+                    rc_ensemble=spec.rc_ensemble,
+                    embedding_cache=spec.embedding_cache,
+                    embedding_head=spec.embedding_head,
+                    embedding_include_metadata=spec.embedding_include_metadata,
                     random_state=seed,
                 )
                 for spec in model_specs
@@ -566,22 +902,42 @@ def run_real_seed_sweep(
             random_state=seed,
             bootstrap_iterations=bootstrap_iterations,
             ci_confidence=ci_confidence,
+            calibration_method=calibration_method,
+            calibration_group=calibration_group,
         )
-        for table in (artifacts.results, artifacts.selective, artifacts.split_counts, artifacts.bootstrap_cis):
+        for table in (
+            artifacts.results,
+            artifacts.selective,
+            artifacts.split_counts,
+            artifacts.bootstrap_cis,
+            artifacts.calibration,
+        ):
             table.insert(0, "seed", seed)
         result_frames.append(artifacts.results)
         selective_frames.append(artifacts.selective)
         split_count_frames.append(artifacts.split_counts)
+        calibration_frames.append(artifacts.calibration)
         if not artifacts.bootstrap_cis.empty:
             ci_frames.append(artifacts.bootstrap_cis)
         partial_results = pd.concat(result_frames, ignore_index=True) if result_frames else pd.DataFrame()
         partial_selective = pd.concat(selective_frames, ignore_index=True) if selective_frames else pd.DataFrame()
         partial_split_counts = pd.concat(split_count_frames, ignore_index=True) if split_count_frames else pd.DataFrame()
         partial_bootstrap_cis = pd.concat(ci_frames, ignore_index=True) if ci_frames else pd.DataFrame()
+        partial_calibration = pd.concat(calibration_frames, ignore_index=True) if calibration_frames else pd.DataFrame()
+        partial_pairwise = pairwise_metric_deltas(partial_results, PAIRWISE_RESULT_METRICS)
+        partial_selective_pairwise = pairwise_metric_deltas(partial_selective, PAIRWISE_SELECTIVE_METRICS)
         partial_results.to_csv(paths["seed_results"], index=False)
         partial_selective.to_csv(paths["seed_selective"], index=False)
         partial_split_counts.to_csv(paths["seed_split_counts"], index=False)
         partial_bootstrap_cis.to_csv(paths["seed_bootstrap_cis"], index=False)
+        partial_calibration.to_csv(paths["seed_calibration_report"], index=False)
+        partial_pairwise.to_csv(paths["seed_pairwise_deltas"], index=False)
+        summarize_pairwise_deltas(partial_pairwise).to_csv(paths["seed_pairwise_delta_summary"], index=False)
+        partial_selective_pairwise.to_csv(paths["seed_selective_pairwise_deltas"], index=False)
+        summarize_pairwise_deltas(partial_selective_pairwise).to_csv(
+            paths["seed_selective_pairwise_delta_summary"],
+            index=False,
+        )
         summarize_seed_results(
             partial_results,
             ("auprc", "auroc", "ece", "brier", "worst_group_auprc"),
@@ -595,16 +951,26 @@ def run_real_seed_sweep(
     selective = pd.concat(selective_frames, ignore_index=True) if selective_frames else pd.DataFrame()
     split_counts = pd.concat(split_count_frames, ignore_index=True) if split_count_frames else pd.DataFrame()
     bootstrap_cis = pd.concat(ci_frames, ignore_index=True) if ci_frames else pd.DataFrame()
+    calibration = pd.concat(calibration_frames, ignore_index=True) if calibration_frames else pd.DataFrame()
     result_summary = summarize_seed_results(
         results,
         ("auprc", "auroc", "ece", "brier", "worst_group_auprc"),
     )
     selective_summary = summarize_seed_results(selective, ("auprc", "auroc", "ece", "brier"))
+    pairwise = pairwise_metric_deltas(results, PAIRWISE_RESULT_METRICS)
+    pairwise_summary = summarize_pairwise_deltas(pairwise)
+    selective_pairwise = pairwise_metric_deltas(selective, PAIRWISE_SELECTIVE_METRICS)
+    selective_pairwise_summary = summarize_pairwise_deltas(selective_pairwise)
 
     results.to_csv(paths["seed_results"], index=False)
     selective.to_csv(paths["seed_selective"], index=False)
     split_counts.to_csv(paths["seed_split_counts"], index=False)
     bootstrap_cis.to_csv(paths["seed_bootstrap_cis"], index=False)
+    calibration.to_csv(paths["seed_calibration_report"], index=False)
+    pairwise.to_csv(paths["seed_pairwise_deltas"], index=False)
+    pairwise_summary.to_csv(paths["seed_pairwise_delta_summary"], index=False)
+    selective_pairwise.to_csv(paths["seed_selective_pairwise_deltas"], index=False)
+    selective_pairwise_summary.to_csv(paths["seed_selective_pairwise_delta_summary"], index=False)
     result_summary.to_csv(paths["seed_result_summary"], index=False)
     selective_summary.to_csv(paths["seed_selective_summary"], index=False)
     return paths

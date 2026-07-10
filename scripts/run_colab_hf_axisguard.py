@@ -310,6 +310,30 @@ def _build_optimizer(model: HFAxisGuard, args: argparse.Namespace) -> torch.opti
     return torch.optim.AdamW(groups, lr=args.lr, weight_decay=args.weight_decay)
 
 
+def _apply_lora_if_requested(model: HFAxisGuard, args: argparse.Namespace) -> None:
+    if args.peft == "none":
+        return
+    if args.peft != "lora":
+        raise ValueError("peft must be one of: none, lora")
+    try:
+        from peft import LoraConfig, get_peft_model
+    except ImportError as exc:
+        raise ImportError("LoRA runs require `pip install peft` or `pip install -e .[deep]` after updating extras") from exc
+
+    target_modules = args.lora_target_modules or ["query", "key", "value"]
+    config = LoraConfig(
+        r=int(args.lora_r),
+        lora_alpha=int(args.lora_alpha),
+        lora_dropout=float(args.lora_dropout),
+        target_modules=target_modules,
+        bias="none",
+    )
+    model.encoder = get_peft_model(model.encoder, config)
+    trainable = sum(param.numel() for param in model.encoder.parameters() if param.requires_grad)
+    total = sum(param.numel() for param in model.encoder.parameters())
+    print(f"[peft] LoRA enabled on encoder: trainable={trainable:,} total={total:,}", flush=True)
+
+
 def _summarize_metrics(frame: pd.DataFrame, group_cols: list[str], metrics: list[str]) -> pd.DataFrame:
     rows = []
     for keys, group in frame.groupby(group_cols, dropna=False):
@@ -442,6 +466,8 @@ def run_one(args: argparse.Namespace, seed: int) -> tuple[pd.DataFrame, pd.DataF
         freeze_backbone=args.freeze_backbone,
         trust_remote_code=args.trust_remote_code,
     ).to(device)
+    _apply_lora_if_requested(model, args)
+    model.to(device)
     optimizer = _build_optimizer(model, args)
     labels = train["label"].to_numpy(dtype=np.float32)
     pos_weight = torch.tensor(max((len(labels) - labels.sum()) / max(labels.sum(), 1), 1.0), device=device)
@@ -634,6 +660,16 @@ def main() -> int:
     parser.add_argument("--rc-ensemble", action="store_true", help="Average forward and reverse-complement probabilities.")
     parser.add_argument("--device", choices=["cpu", "cuda"], default="cuda")
     parser.add_argument("--freeze-backbone", action="store_true")
+    parser.add_argument("--peft", choices=["none", "lora"], default="none")
+    parser.add_argument("--lora-r", type=int, default=16)
+    parser.add_argument("--lora-alpha", type=int, default=32)
+    parser.add_argument("--lora-dropout", type=float, default=0.05)
+    parser.add_argument(
+        "--lora-target-modules",
+        action="append",
+        default=None,
+        help="LoRA target module name; repeatable. Defaults to query/key/value.",
+    )
     parser.add_argument("--early-stopping-patience", type=int, default=0)
     parser.add_argument("--early-stopping-min-delta", type=float, default=0.0)
     parser.add_argument(

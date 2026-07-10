@@ -8,10 +8,11 @@ This repository is a research package for an MLCB-style submission. It contains:
 - Data manifest scaffolding for ENCODE/GEO-style peak files.
 - Reproducible split logic for IID, assay-held-out, lab-held-out, species-held-out, and TF-family-held-out evaluation.
 - Baselines for GC/artifact controls and k-mer logistic regression, with metadata-aware variants.
-- `PICARD-TF` / `axis_guard_cnn`, a protocol-factorized CNN that uses counterfactual protocol masking and calibrated selective prediction under shift.
+- `PICARD-TF` / `axis_guard_cnn`, a protocol-factorized CNN that uses counterfactual protocol masking/shuffling and calibrated selective prediction under shift.
 - Repeated-seed ablation sweeps for `tiny_cnn`, `axis_guard_no_cf`, `axis_guard_no_resid`, `axis_guard_no_adv`, and `axis_guard_full`.
+- A100-oriented SOTA hooks: frozen HF embedding caches, embedding-head baselines, reverse-complement CNN augmentation/ensembling, GroupDRO, CORAL/MMD protocol alignment, protocol-aware Platt calibration, and optional LoRA for the HF AxisGuard runner.
 - Evaluation-time cleanup flags for all-N windows and exact duplicate sequence strings.
-- Calibration, Brier/ECE, worst-group metrics, and selective-prediction/abstention analysis.
+- Calibration, Brier/ECE, pairwise model deltas, paired-bootstrap delta CIs, worst-group metrics, and selective-prediction/abstention analysis.
 - Real preliminary assay-shift and ENCODE shift reports for an 8-page paper draft or 2-page abstract.
 
 ## Quickstart
@@ -71,7 +72,20 @@ This writes `real_results.csv`, `real_group_metrics.csv`, `real_selective.csv`, 
 Run the novel model and deep baseline explicitly:
 
 ```powershell
-python -m assayshift_tf.cli evaluate-real data\processed\windows.parquet --prefix real_axisguard --out reports --figures figures --split iid --model gc --model kmer --model kmer_metadata --model tiny_cnn --model axis_guard_full --deep-epochs 25 --deep-batch-size 256 --drop-all-n --drop-duplicate-sequences
+python -m assayshift_tf.cli evaluate-real data\processed\windows.parquet --prefix real_axisguard --out reports --figures figures --split iid --model gc --model kmer --model kmer_metadata --model tiny_cnn --model axis_guard_full --deep-epochs 25 --deep-batch-size 256 --counterfactual-mode mask_or_shuffle --rc-augment --rc-ensemble --calibration protocol_platt --drop-all-n --drop-duplicate-sequences
+```
+
+Cache frozen DNA foundation-model embeddings and evaluate lightweight heads:
+
+```powershell
+python -m assayshift_tf.cli embed data\processed\windows.parquet --out reports\ntv2_embeddings.npz --hf-model InstaDeepAI/nucleotide-transformer-v2-250m-multi-species --device cuda --batch-size 32 --trust-remote-code
+python -m assayshift_tf.cli evaluate-real data\processed\windows.parquet --prefix real_embedding_head --out reports --figures figures --split iid --model embedding_logreg --model embedding_metadata --embedding-cache reports\ntv2_embeddings.npz --calibration protocol_platt
+```
+
+Run GroupDRO plus protocol alignment for deep models:
+
+```powershell
+python -m assayshift_tf.cli sweep-real data\processed\windows.parquet --prefix real_groupdro_mmd --out reports --split iid --model tiny_cnn --model axis_guard_full --deep-epochs 25 --deep-batch-size 256 --deep-objective groupdro --group-key protocol --protocol-penalty mmd --protocol-penalty-weight 0.01 --rc-augment --rc-ensemble
 ```
 
 Run the 5-seed ablation suite:
@@ -84,6 +98,7 @@ On Colab A100:
 
 ```bash
 bash scripts/run_colab_a100_axisguard_sweep.sh
+HF_MODEL=InstaDeepAI/nucleotide-transformer-v2-250m-multi-species PEFT=lora bash scripts/run_colab_a100_hf_axisguard.sh
 ```
 
 6. Reproduce the hg19 assay-shift pilot:

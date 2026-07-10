@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -25,14 +26,26 @@ class ModelSpec:
     deep_lr: float = 1e-3
     deep_device: str = "auto"
     axis_dropout: float = 0.15
+    counterfactual_mode: str = "mask"
     counterfactual_weight: float = 0.35
     metadata_residual_weight: float = 0.02
     adversarial_weight: float = 0.0
+    deep_objective: str = "erm"
+    group_key: str = "protocol"
+    groupdro_eta: float = 0.2
+    protocol_penalty: str = "none"
+    protocol_penalty_weight: float = 0.0
+    rc_augment: bool = False
+    rc_ensemble: bool = False
+    embedding_cache: str | Path | None = None
+    embedding_head: str = "logreg"
+    embedding_include_metadata: bool = False
     random_state: int = 13
 
 
 DEEP_MODEL_KINDS = {"tiny_cnn", "axis_guard_cnn"}
-METADATA_MODEL_KINDS = {"kmer_metadata", "axis_guard_cnn"}
+EMBEDDING_MODEL_KINDS = {"embedding_head"}
+METADATA_MODEL_KINDS = {"kmer_metadata", "axis_guard_cnn", "embedding_head"}
 
 
 def _available_columns(frame: pd.DataFrame, candidates: list[str]) -> list[str]:
@@ -51,9 +64,20 @@ def model_spec_from_name(
     deep_lr: float | None = None,
     deep_device: str | None = None,
     axis_dropout: float | None = None,
+    counterfactual_mode: str | None = None,
     counterfactual_weight: float | None = None,
     metadata_residual_weight: float | None = None,
     adversarial_weight: float | None = None,
+    deep_objective: str | None = None,
+    group_key: str | None = None,
+    groupdro_eta: float | None = None,
+    protocol_penalty: str | None = None,
+    protocol_penalty_weight: float | None = None,
+    rc_augment: bool | None = None,
+    rc_ensemble: bool | None = None,
+    embedding_cache: str | Path | None = None,
+    embedding_head: str | None = None,
+    embedding_include_metadata: bool | None = None,
     random_state: int = 13,
 ) -> ModelSpec:
     aliases = {
@@ -84,6 +108,14 @@ def model_spec_from_name(
             "kind": "axis_guard_cnn",
             "adversarial_weight": 0.0,
         },
+        "embedding_head": {"name": "embedding_head", "kind": "embedding_head"},
+        "embedding_logreg": {"name": "embedding_logreg", "kind": "embedding_head", "embedding_head": "logreg"},
+        "embedding_mlp": {"name": "embedding_mlp", "kind": "embedding_head", "embedding_head": "mlp"},
+        "embedding_metadata": {
+            "name": "embedding_metadata",
+            "kind": "embedding_head",
+            "embedding_include_metadata": True,
+        },
     }
     key = name.strip().lower()
     if key not in aliases:
@@ -94,9 +126,20 @@ def model_spec_from_name(
         "deep_lr": 1e-3,
         "deep_device": "auto",
         "axis_dropout": 0.15,
+        "counterfactual_mode": "mask",
         "counterfactual_weight": 0.35,
         "metadata_residual_weight": 0.02,
         "adversarial_weight": 0.0,
+        "deep_objective": "erm",
+        "group_key": "protocol",
+        "groupdro_eta": 0.2,
+        "protocol_penalty": "none",
+        "protocol_penalty_weight": 0.0,
+        "rc_augment": False,
+        "rc_ensemble": False,
+        "embedding_cache": None,
+        "embedding_head": "logreg",
+        "embedding_include_metadata": False,
         **aliases[key],
     }
     overrides = {
@@ -105,9 +148,20 @@ def model_spec_from_name(
         "deep_lr": deep_lr,
         "deep_device": deep_device,
         "axis_dropout": axis_dropout,
+        "counterfactual_mode": counterfactual_mode,
         "counterfactual_weight": counterfactual_weight,
         "metadata_residual_weight": metadata_residual_weight,
         "adversarial_weight": adversarial_weight,
+        "deep_objective": deep_objective,
+        "group_key": group_key,
+        "groupdro_eta": groupdro_eta,
+        "protocol_penalty": protocol_penalty,
+        "protocol_penalty_weight": protocol_penalty_weight,
+        "rc_augment": rc_augment,
+        "rc_ensemble": rc_ensemble,
+        "embedding_cache": embedding_cache,
+        "embedding_head": embedding_head,
+        "embedding_include_metadata": embedding_include_metadata,
     }
     for field, value in overrides.items():
         if value is not None:
@@ -120,9 +174,20 @@ def model_spec_from_name(
         deep_lr=alias["deep_lr"],
         deep_device=alias["deep_device"],
         axis_dropout=alias["axis_dropout"],
+        counterfactual_mode=alias["counterfactual_mode"],
         counterfactual_weight=alias["counterfactual_weight"],
         metadata_residual_weight=alias["metadata_residual_weight"],
         adversarial_weight=alias["adversarial_weight"],
+        deep_objective=alias["deep_objective"],
+        group_key=alias["group_key"],
+        groupdro_eta=alias["groupdro_eta"],
+        protocol_penalty=alias["protocol_penalty"],
+        protocol_penalty_weight=alias["protocol_penalty_weight"],
+        rc_augment=alias["rc_augment"],
+        rc_ensemble=alias["rc_ensemble"],
+        embedding_cache=alias["embedding_cache"],
+        embedding_head=alias["embedding_head"],
+        embedding_include_metadata=alias["embedding_include_metadata"],
         random_state=random_state,
     )
 
@@ -137,12 +202,34 @@ def build_model(spec: ModelSpec, example_frame: pd.DataFrame):
             lr=spec.deep_lr,
             device=spec.deep_device,
             axis_dropout=spec.axis_dropout,
+            counterfactual_mode=spec.counterfactual_mode,
             counterfactual_weight=spec.counterfactual_weight,
             metadata_residual_weight=spec.metadata_residual_weight,
             adversarial_weight=spec.adversarial_weight,
+            objective=spec.deep_objective,
+            group_key=spec.group_key,
+            groupdro_eta=spec.groupdro_eta,
+            protocol_penalty=spec.protocol_penalty,
+            protocol_penalty_weight=spec.protocol_penalty_weight,
+            rc_augment=spec.rc_augment,
+            rc_ensemble=spec.rc_ensemble,
             random_state=spec.random_state,
         )
         return TorchProbClassifier(spec.kind, config)
+
+    if spec.kind in EMBEDDING_MODEL_KINDS:
+        if spec.embedding_cache is None:
+            raise ValueError("embedding_head requires --embedding-cache")
+        from assayshift_tf.embeddings import EmbeddingHeadClassifier, EmbeddingHeadConfig
+
+        return EmbeddingHeadClassifier(
+            EmbeddingHeadConfig(
+                cache_path=spec.embedding_cache,
+                head=spec.embedding_head,
+                include_metadata=spec.embedding_include_metadata,
+                random_state=spec.random_state,
+            )
+        )
 
     transformers = []
     if spec.kind in {"kmer", "kmer_metadata"}:

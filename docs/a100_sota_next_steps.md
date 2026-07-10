@@ -1,50 +1,273 @@
-# A100 Path From Reviewer-Solid To SOTA-Oriented
+# A100 SOTA Upgrade Plan
 
-## What The New Additions Buy
-
-The repeated seeds, ablations, duplicate/all-N filtering, and careful claim framing make the paper much more defensible. They help answer reviewer questions like:
-
-- Is the AxisGuard result stable across random seeds?
-- Which part of the method matters: counterfactual masking, residual penalty, adversary, or just CNN capacity?
-- Did duplicate sequence windows or all-N negatives inflate performance?
-- Are we overselling weak family/species shift results?
-
-These additions are necessary for a serious MLCB paper. They do not alone make the model SOTA.
-
-## What SOTA Needs On The Colab A100
-
-Use the A100 for representation strength after the benchmark is clean:
-
-1. Run the 5-seed ablation sweep:
+This document is the repo-grounded version of the adversarial SOTA plan. The attached deep-research memo was directionally useful, but it did not inspect this repository and therefore invented several command/module names. The real CLI entry point here is:
 
 ```bash
+python -m assayshift_tf.cli ...
+```
+
+The real model aliases currently exposed by the evaluator are:
+
+- `gc`
+- `kmer`
+- `kmer_metadata`
+- `tiny_cnn`
+- `axis_guard_cnn`
+- `axis_guard_full`
+- `axis_guard_no_cf`
+- `axis_guard_no_resid`
+- `axis_guard_no_adv`
+- `picard_tf`
+- `embedding_head`
+- `embedding_logreg`
+- `embedding_mlp`
+- `embedding_metadata`
+
+The real A100/HF runner is:
+
+```bash
+scripts/run_colab_hf_axisguard.py
+scripts/run_colab_a100_hf_axisguard.sh
+```
+
+## Honest Current State
+
+AssayShift-TF is strongest right now as a benchmark and robustness-evaluation paper with a guarded-model contribution. It is not yet a universal SOTA TF-binding method.
+
+The cleanest positive result is the primary assay-shift setting: held-out CUT&RUN on `data/processed/assay_mvp_hg19_windows.parquet`, where `axis_guard_full` modestly beats `tiny_cnn` on AUPRC/Brier/ECE in the final evaluator. ENCODE is mixed: AxisGuard helps calibration and sometimes Brier under held-out lab shift, but k-mer baselines can still win raw AUPRC, and the held-out TF-family setting is not a clear AxisGuard win.
+
+The correct paper claim is therefore:
+
+> AssayShift-TF exposes assay/lab/family shift failures that IID metrics hide, and PICARD-TF / AxisGuard provides a protocol-guarded, calibrated model that improves robustness in some assay/lab-shift settings, while the benchmark honestly reveals where classical and plain CNN baselines remain stronger.
+
+Do not claim causal disentanglement, guaranteed assay generalization, or universal SOTA.
+
+## What Already Exists
+
+Implemented:
+
+- sklearn-style evaluator compatibility via `fit` / `predict_proba`.
+- `tiny_cnn` and `axis_guard_cnn` in the deep model path.
+- AxisGuard losses: counterfactual protocol perturbation, metadata residual penalty, optional adversarial heads.
+- CLI flags for deep epochs, batch size, LR, device, dropout, counterfactual mode, counterfactual weight, residual weight, adversarial weight.
+- `evaluate-real` for final report generation.
+- `sweep-real` for repeated seed sweeps.
+- Pairwise model-delta tables for results and selective metrics.
+- Paired-bootstrap pairwise delta CIs for `evaluate-real`.
+- Seed-sweep pairwise delta summaries for `sweep-real`.
+- Frozen HF embedding cache generation via `python -m assayshift_tf.cli embed`.
+- Frozen-embedding logistic/MLP heads via `embedding_head`, `embedding_logreg`, `embedding_mlp`, and `embedding_metadata`.
+- Reverse-complement augmentation/ensembling for local CNNs via `--rc-augment` and `--rc-ensemble`.
+- Protocol-aware calibration via `--calibration protocol_platt`.
+- GroupDRO training for deep models via `--deep-objective groupdro`.
+- CORAL/MMD protocol alignment via `--protocol-penalty coral|mmd`.
+- LoRA/PEFT hooks in `scripts/run_colab_hf_axisguard.py`.
+- Colab/A100 CNN sweep script.
+- Colab/A100 HF AxisGuard script.
+
+Not yet implemented as first-class repo features:
+
+- Full Enformer/Borzoi feature extraction.
+- Automated paper table generation from the new pairwise delta files.
+
+Those are the real SOTA upgrade hooks.
+
+## First A100 Priority: Prove The Existing Gap
+
+Before adding new architecture, run clean seed sweeps. If the narrow AxisGuard win vanishes across seeds, the model story must be downgraded and the paper should be framed mostly as a benchmark.
+
+Use the existing script:
+
+```bash
+cd /content/AssayShift-TF
 bash scripts/run_colab_a100_axisguard_sweep.sh
 ```
 
-2. If AxisGuard remains stable, add one stronger backbone:
+Expected outputs include files like:
 
-- frozen DNABERT-2 / Nucleotide Transformer / HyenaDNA embeddings plus the same AxisGuard protocol head;
-- then optionally fine-tune only the final transformer block or adapters;
-- keep `tiny_cnn` as the efficiency baseline.
+```text
+reports/real_assay_mvp_hg19_axisguard_clean_5seed_a100_seed_results.csv
+reports/real_assay_mvp_hg19_axisguard_clean_5seed_a100_seed_result_summary.csv
+reports/real_assay_mvp_hg19_axisguard_clean_5seed_a100_seed_selective_summary.csv
+reports/real_encode_k562_grch38_axisguard_clean_5seed_a100_seed_results.csv
+reports/real_encode_k562_grch38_axisguard_clean_5seed_a100_seed_result_summary.csv
+reports/real_encode_k562_grch38_axisguard_clean_5seed_a100_seed_selective_summary.csv
+```
 
-3. Add TF biological conditioning for family shift:
+Decision rule:
 
-- TF protein or DNA-binding-domain embedding;
-- motif/PWM prior score when available;
-- family-held-out evaluation should be treated as the main test for this extension.
+- If AxisGuard beats `tiny_cnn` with stable mean and small std on held-out CUT&RUN, keep the AxisGuard model claim.
+- If the win is unstable, make the benchmark/calibration framework the main claim.
+- If ENCODE family shift stays worse than `tiny_cnn`, report that plainly.
 
-4. Report SOTA only on a clearly named setting:
+## Second A100 Priority: Final Paper-Facing Evaluator Runs
 
-- "best under lab shift";
-- "best calibrated selective predictor";
-- "best worst-group AUPRC";
-- not "universal SOTA TF-binding predictor" unless it beats strong baselines across assay, lab, and family splits.
+Run final report generation with all baseline families and bootstrap CIs.
 
-## Current Honest Claim
+Primary assay-shift command:
 
-The current repo supports this claim:
+```bash
+python -m assayshift_tf.cli evaluate-real data/processed/assay_mvp_hg19_windows.parquet \
+  --out reports \
+  --figures figures \
+  --prefix real_assay_mvp_hg19_axisguard_final_a100 \
+  --split iid \
+  --split "assay_heldout_cutrun=assay:CUT&RUN" \
+  --model gc \
+  --model kmer \
+  --model kmer_metadata \
+  --model tiny_cnn \
+  --model axis_guard_full \
+  --deep-epochs 50 \
+  --deep-batch-size 1024 \
+  --deep-device cuda \
+  --counterfactual-mode mask_or_shuffle \
+  --rc-augment \
+  --rc-ensemble \
+  --calibration protocol_platt \
+  --drop-all-n \
+  --drop-duplicate-sequences \
+  --bootstrap 1000
+```
 
-> PICARD-TF / AxisGuard-CNN is a protocol-factorized reliability model that improves lab-shift calibration and discrimination over a plain CNN in a real ENCODE K562 stress test, while the benchmark exposes settings where a plain sequence CNN remains stronger.
+ENCODE stress command:
 
-That is already a meaningful MLCB contribution. The A100 should now be used to test whether a stronger pretrained DNA/protein backbone turns this into a SOTA predictor rather than only a reliability-oriented model.
+```bash
+python -m assayshift_tf.cli evaluate-real data/processed/encode_k562_grch38_windows.parquet \
+  --out reports \
+  --figures figures \
+  --prefix real_encode_k562_grch38_axisguard_final_a100 \
+  --split iid \
+  --split "lab_heldout_haib=lab:Richard Myers, HAIB" \
+  --split "family_heldout_zinc_finger=tf_family:zinc_finger" \
+  --model gc \
+  --model kmer \
+  --model kmer_metadata \
+  --model tiny_cnn \
+  --model axis_guard_full \
+  --deep-epochs 50 \
+  --deep-batch-size 1024 \
+  --deep-device cuda \
+  --counterfactual-mode mask_or_shuffle \
+  --rc-augment \
+  --rc-ensemble \
+  --calibration protocol_platt \
+  --drop-all-n \
+  --drop-duplicate-sequences \
+  --bootstrap 1000
+```
 
+## Frozen-Embedding Head Runs
+
+Cache embeddings once:
+
+```bash
+python -m assayshift_tf.cli embed data/processed/assay_mvp_hg19_windows.parquet \
+  --out reports/assay_ntv2_250m_embeddings.npz \
+  --hf-model InstaDeepAI/nucleotide-transformer-v2-250m-multi-species \
+  --device cuda \
+  --batch-size 32 \
+  --max-tokens 256 \
+  --pooling mean \
+  --trust-remote-code \
+  --drop-all-n \
+  --drop-duplicate-sequences
+```
+
+Evaluate the frozen representation through the normal benchmark:
+
+```bash
+python -m assayshift_tf.cli evaluate-real data/processed/assay_mvp_hg19_windows.parquet \
+  --out reports \
+  --figures figures \
+  --prefix real_assay_ntv2_embedding_head \
+  --split iid \
+  --split "assay_heldout_cutrun=assay:CUT&RUN" \
+  --model embedding_logreg \
+  --model embedding_metadata \
+  --embedding-cache reports/assay_ntv2_250m_embeddings.npz \
+  --calibration protocol_platt \
+  --bootstrap 1000 \
+  --drop-all-n \
+  --drop-duplicate-sequences
+```
+
+## GroupDRO / Alignment Runs
+
+```bash
+python -m assayshift_tf.cli sweep-real data/processed/encode_k562_grch38_windows.parquet \
+  --out reports \
+  --prefix real_encode_groupdro_mmd_5seed \
+  --split "lab_heldout_haib=lab:Richard Myers, HAIB" \
+  --split "family_heldout_zinc_finger=tf_family:zinc_finger" \
+  --model tiny_cnn \
+  --model axis_guard_full \
+  --deep-epochs 50 \
+  --deep-batch-size 1024 \
+  --deep-device cuda \
+  --deep-objective groupdro \
+  --group-key protocol \
+  --groupdro-eta 0.2 \
+  --protocol-penalty mmd \
+  --protocol-penalty-weight 0.01 \
+  --rc-augment \
+  --rc-ensemble \
+  --calibration protocol_platt \
+  --drop-all-n \
+  --drop-duplicate-sequences
+```
+
+## Third A100 Priority: Stronger Foundation-Model Arm
+
+The current HF model arm uses Nucleotide Transformer v2 50M. On an A100, the most direct stronger run is the same runner with the 250M checkpoint:
+
+```bash
+cd /content/AssayShift-TF
+HF_MODEL=InstaDeepAI/nucleotide-transformer-v2-250m-multi-species \
+  bash scripts/run_colab_a100_hf_axisguard.sh
+```
+
+Optional LoRA run:
+
+```bash
+HF_MODEL=InstaDeepAI/nucleotide-transformer-v2-250m-multi-species \
+PEFT=lora \
+LORA_R=16 \
+LORA_ALPHA=32 \
+  bash scripts/run_colab_a100_hf_axisguard.sh
+```
+
+Treat 500M as experimental only after 250M works. If 250M underperforms k-mer/CNN again, do not feature it as the headline model. Instead use it as an honest result: foundation DNA models do not automatically solve protocol shift.
+
+## What To Implement Next
+
+Ranked by expected value:
+
+1. Run frozen embeddings for NT-v2-250M and DNABERT-2; compare `embedding_logreg` and `embedding_metadata`.
+2. Run GroupDRO + MMD on the ENCODE lab/family splits.
+3. Run LoRA only if frozen embeddings show signal under shift.
+4. Generate paper tables from pairwise deltas and seed summaries.
+
+## Reviewer-Proof Claim Template
+
+Use this only if seed sweeps and bootstrap CIs support it:
+
+> Across leakage-controlled assay/lab/family shifts, AssayShift-TF shows that IID TF-binding performance overstates reliability under protocol shift. AxisGuard improves calibration and selective prediction under held-out assay/lab shifts relative to a capacity-matched CNN, but family shift remains challenging and classical k-mer models remain competitive on raw AUPRC.
+
+Avoid:
+
+- "SOTA TF-binding predictor"
+- "causal disentanglement"
+- "guaranteed generalization"
+- "foundation models solve assay shift"
+- any claim based on a single seed
+
+## Venue Framing
+
+Best framing:
+
+- benchmark plus robustness evaluation;
+- calibrated/selective prediction under assay/lab/family shift;
+- guarded model as a serious ablation, not an overclaimed universal method.
+
+Best-fit venues are computational biology / ML-for-genomics venues, especially if the final paper emphasizes the benchmark and honest failure analysis. A main methods claim requires stable, statistically supported wins with CIs.

@@ -8,6 +8,10 @@ set -euo pipefail
 python -m pip install -e ".[deep]"
 
 HF_MODEL="${HF_MODEL:-InstaDeepAI/nucleotide-transformer-v2-50m-multi-species}"
+PEFT="${PEFT:-none}"
+LORA_R="${LORA_R:-16}"
+LORA_ALPHA="${LORA_ALPHA:-32}"
+LORA_DROPOUT="${LORA_DROPOUT:-0.05}"
 COMMON_ARGS=(
   --hf-model "$HF_MODEL"
   --trust-remote-code
@@ -27,6 +31,10 @@ COMMON_ARGS=(
   --adversarial-weight 0.02
   --protocol-dropout 0.1
   --grad-clip 1.0
+  --peft "$PEFT"
+  --lora-r "$LORA_R"
+  --lora-alpha "$LORA_ALPHA"
+  --lora-dropout "$LORA_DROPOUT"
 )
 
 python scripts/run_colab_hf_axisguard.py data/processed/encode_k562_grch38_windows.parquet \

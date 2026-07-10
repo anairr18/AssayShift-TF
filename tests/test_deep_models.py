@@ -40,13 +40,14 @@ def _deep_frame(n: int = 48) -> pd.DataFrame:
     return add_sequence_stats(pd.DataFrame(rows))
 
 
-def _fast_config() -> DeepModelConfig:
+def _fast_config(counterfactual_mode: str = "mask") -> DeepModelConfig:
     return DeepModelConfig(
         epochs=1,
         batch_size=12,
         conv_channels=8,
         embedding_dim=4,
         hidden_dim=8,
+        counterfactual_mode=counterfactual_mode,
         counterfactual_weight=0.1,
         metadata_residual_weight=0.01,
         axis_dropout=0.1,
@@ -87,6 +88,33 @@ def test_axis_guard_counterfactual_masks_protocol_not_biology():
     for column in ("assay", "lab", "species", "biosample", "cell_type", "assembly"):
         idx = model.categorical_columns_.index(column)
         assert torch.equal(cf_categorical[:, idx], torch.zeros_like(cf_categorical[:, idx]))
+
+
+def test_axis_guard_counterfactual_can_shuffle_protocol_not_biology():
+    frame = _deep_frame()
+    model = TorchProbClassifier("axis_guard_cnn", _fast_config(counterfactual_mode="shuffle")).fit(frame, frame["label"])
+    batch = frame.head(12)
+    numeric = torch.tensor(model._transform_numeric(batch), device=model.device_)
+    categorical = torch.tensor(model._transform_categorical(batch), dtype=torch.long, device=model.device_)
+    torch.manual_seed(0)
+    cf_numeric, cf_categorical = model._counterfactual_metadata(numeric, categorical, torch)
+
+    tf_idx = model.categorical_columns_.index("tf")
+    family_idx = model.categorical_columns_.index("tf_family")
+    assert torch.equal(cf_categorical[:, tf_idx], categorical[:, tf_idx])
+    assert torch.equal(cf_categorical[:, family_idx], categorical[:, family_idx])
+
+    assay_idx = model.categorical_columns_.index("assay")
+    lab_idx = model.categorical_columns_.index("lab")
+    assert not torch.equal(cf_categorical[:, assay_idx], torch.zeros_like(cf_categorical[:, assay_idx]))
+    assert not torch.equal(cf_categorical[:, lab_idx], torch.zeros_like(cf_categorical[:, lab_idx]))
+    assert torch.equal(torch.sort(cf_categorical[:, assay_idx]).values, torch.sort(categorical[:, assay_idx]).values)
+    assert torch.equal(torch.sort(cf_categorical[:, lab_idx]).values, torch.sort(categorical[:, lab_idx]).values)
+    assert (
+        not torch.equal(cf_categorical[:, assay_idx], categorical[:, assay_idx])
+        or not torch.equal(cf_categorical[:, lab_idx], categorical[:, lab_idx])
+        or not torch.equal(cf_numeric, numeric)
+    )
 
 
 def test_axis_guard_ignores_leakage_prone_columns():
@@ -135,6 +163,7 @@ def test_real_evaluation_runs_deep_models_end_to_end(tmp_path):
 
 def test_axis_guard_ablation_aliases_have_expected_weights():
     full = model_spec_from_name("axis_guard_full")
+    shuffled = model_spec_from_name("axis_guard_cnn", counterfactual_mode="shuffle")
     no_cf = model_spec_from_name("axis_guard_no_cf")
     no_resid = model_spec_from_name("axis_guard_no_resid")
     no_adv = model_spec_from_name("axis_guard_no_adv")
@@ -142,6 +171,7 @@ def test_axis_guard_ablation_aliases_have_expected_weights():
     assert full.name == "axis_guard_full"
     assert full.counterfactual_weight > 0
     assert full.metadata_residual_weight > 0
+    assert shuffled.counterfactual_mode == "shuffle"
     assert full.adversarial_weight > 0
     assert no_cf.counterfactual_weight == 0.0
     assert no_resid.metadata_residual_weight == 0.0

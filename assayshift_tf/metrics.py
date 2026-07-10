@@ -179,3 +179,70 @@ class PlattCalibrator:
         p = np.clip(p, 1e-7, 1 - 1e-7)
         logits = np.log(p / (1.0 - p)).reshape(-1, 1)
         return self.model.predict_proba(logits)[:, 1]
+
+
+@dataclass
+class ProtocolPlattCalibrator:
+    """Group-specific Platt scaling with a global fallback for unseen protocols."""
+
+    group_col: str
+    global_model: PlattCalibrator | None = None
+    group_models: dict[str, PlattCalibrator] | None = None
+    group_counts: dict[str, int] | None = None
+
+    def fit(
+        self,
+        prob: Iterable[float],
+        y_true: Iterable[float],
+        groups: Iterable[object],
+    ) -> "ProtocolPlattCalibrator":
+        p = np.asarray(list(prob), dtype=float)
+        y = np.asarray(list(y_true), dtype=float)
+        g = pd.Series(list(groups)).fillna("").astype(str).to_numpy()
+        if not (len(p) == len(y) == len(g)):
+            raise ValueError("prob, y_true, and groups must have the same length")
+        self.global_model = PlattCalibrator().fit(p, y)
+        self.group_models = {}
+        self.group_counts = {}
+        for group in sorted(set(g.tolist())):
+            mask = g == group
+            self.group_counts[group] = int(mask.sum())
+            self.group_models[group] = PlattCalibrator().fit(p[mask], y[mask])
+        return self
+
+    def predict(self, prob: Iterable[float], groups: Iterable[object]) -> np.ndarray:
+        if self.global_model is None or self.group_models is None:
+            raise RuntimeError("ProtocolPlattCalibrator.fit must be called before predict")
+        p = np.asarray(list(prob), dtype=float)
+        g = pd.Series(list(groups)).fillna("").astype(str).to_numpy()
+        out = self.global_model.predict(p)
+        for group, model in self.group_models.items():
+            mask = g == group
+            if np.any(mask):
+                out[mask] = model.predict(p[mask])
+        return np.clip(out, 1e-7, 1 - 1e-7)
+
+    def report(self, groups: Iterable[object]) -> pd.DataFrame:
+        if self.group_models is None or self.group_counts is None:
+            raise RuntimeError("ProtocolPlattCalibrator.fit must be called before report")
+        requested = pd.Series(list(groups)).fillna("").astype(str)
+        rows = [
+            {
+                "calibration_group_col": self.group_col,
+                "calibration_group": "__global__",
+                "fit_n": int(sum(self.group_counts.values())),
+                "test_n": int(len(requested)),
+                "used_group_specific": False,
+            }
+        ]
+        for group, test_n in requested.value_counts(dropna=False).sort_index().items():
+            rows.append(
+                {
+                    "calibration_group_col": self.group_col,
+                    "calibration_group": group,
+                    "fit_n": int(self.group_counts.get(group, 0)),
+                    "test_n": int(test_n),
+                    "used_group_specific": group in self.group_models,
+                }
+            )
+        return pd.DataFrame(rows)

@@ -108,6 +108,58 @@ def test_real_data_evaluation_outputs_expected_schemas(tmp_path):
     } <= set(cis.columns)
     assert set(cis["metric"]) == {"auprc", "auroc", "ece", "brier"}
 
+    pairwise = pd.read_csv(paths["pairwise_deltas"])
+    assert {
+        "split",
+        "split_type",
+        "holdout",
+        "model_a",
+        "model_b",
+        "metric",
+        "direction",
+        "model_a_value",
+        "model_b_value",
+        "delta",
+        "delta_favors_model_a",
+        "better_model",
+    } <= set(pairwise.columns)
+    assert not pairwise.empty
+    first = pairwise.iloc[0]
+    assert first["model_a"] != first["model_b"]
+    assert first["delta"] == first["model_a_value"] - first["model_b_value"]
+
+    pairwise_cis = pd.read_csv(paths["pairwise_delta_cis"])
+    assert {
+        "split",
+        "split_type",
+        "holdout",
+        "model_a",
+        "model_b",
+        "metric",
+        "delta",
+        "ci_low",
+        "ci_high",
+        "valid_bootstraps",
+    } <= set(pairwise_cis.columns)
+    assert set(pairwise_cis["metric"]) == {"auprc", "auroc", "ece", "brier"}
+
+    selective_pairwise = pd.read_csv(paths["selective_pairwise_deltas"])
+    assert {"split", "coverage", "model_a", "model_b", "metric", "delta"} <= set(selective_pairwise.columns)
+    assert not selective_pairwise.empty
+
+    calibration = pd.read_csv(paths["calibration_report"])
+    assert {
+        "calibration_method",
+        "split",
+        "model",
+        "calibration_group_col",
+        "calibration_group",
+        "fit_n",
+        "test_n",
+        "used_group_specific",
+    } <= set(calibration.columns)
+    assert not calibration.empty
+
     split_counts = pd.read_csv(paths["split_counts"])
     assert {"split", "split_type", "holdout", "partition", "n", "positive", "negative", "prevalence"} <= set(
         split_counts.columns
@@ -161,3 +213,15 @@ def test_seed_sweep_writes_aggregate_outputs(tmp_path):
     assert set(results["seed"]) == {3, 5}
     summary = pd.read_csv(paths["seed_result_summary"])
     assert {"metric", "mean", "std", "n_seeds"} <= set(summary.columns)
+    pairwise_summary = pd.read_csv(paths["seed_pairwise_delta_summary"])
+    assert {
+        "model_a",
+        "model_b",
+        "metric",
+        "mean_delta",
+        "std_delta",
+        "n_seeds",
+        "model_a_win_rate",
+    } <= set(pairwise_summary.columns)
+    calibration = pd.read_csv(paths["seed_calibration_report"])
+    assert {"seed", "calibration_method", "split", "model", "fit_n", "test_n"} <= set(calibration.columns)
