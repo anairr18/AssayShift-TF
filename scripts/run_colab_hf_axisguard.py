@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
+import os
+import sys
 
 import numpy as np
 import pandas as pd
@@ -310,15 +312,52 @@ def _build_optimizer(model: HFAxisGuard, args: argparse.Namespace) -> torch.opti
     return torch.optim.AdamW(groups, lr=args.lr, weight_decay=args.weight_decay)
 
 
+def _stale_torchao_for_peft() -> bool:
+    """Avoid PEFT crashing on Colab images with an old optional torchao install."""
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+        from packaging.version import Version
+    except ImportError:
+        return False
+    try:
+        torchao_version = Version(version("torchao"))
+    except PackageNotFoundError:
+        return False
+    if torchao_version >= Version("0.16.0"):
+        return False
+    print(
+        f"[peft] Detected torchao {torchao_version}; disabling optional torchao integration for LoRA.",
+        flush=True,
+    )
+    os.environ.setdefault("PEFT_DISABLE_TORCHAO", "1")
+    for name in list(sys.modules):
+        if name == "torchao" or name.startswith("torchao."):
+            sys.modules.pop(name, None)
+    return True
+
+
+def _patch_peft_torchao_dispatch() -> None:
+    try:
+        import peft.import_utils as peft_import_utils
+        import peft.tuners.lora.torchao as peft_lora_torchao
+    except Exception:
+        return
+    peft_import_utils.is_torchao_available = lambda: False
+    peft_lora_torchao.is_torchao_available = lambda: False
+
+
 def _apply_lora_if_requested(model: HFAxisGuard, args: argparse.Namespace) -> None:
     if args.peft == "none":
         return
     if args.peft != "lora":
         raise ValueError("peft must be one of: none, lora")
+    patch_torchao = _stale_torchao_for_peft()
     try:
         from peft import LoraConfig, get_peft_model
     except ImportError as exc:
         raise ImportError("LoRA runs require `pip install peft` or `pip install -e .[deep]` after updating extras") from exc
+    if patch_torchao:
+        _patch_peft_torchao_dispatch()
 
     target_modules = args.lora_target_modules or ["query", "key", "value"]
     config = LoraConfig(
